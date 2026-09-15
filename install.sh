@@ -15,58 +15,115 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="$HOME/.claude/claude-native"
 BIN_DIR="$PREFIX/bin"
 LD="$PREFIX/glibc/lib/ld-linux-aarch64.so.1"
+LOG="$(mktemp)"
+TOTAL=7
+N=0
 
-fail() { echo "[install] FAILED: $*" >&2; exit 1; }
-step() { echo "[install] $*"; }
-
-step "checking platform..."
-[ "$(uname -m)" = "aarch64" ] || fail "this installer only supports aarch64 (found $(uname -m))"
-[ -n "${PREFIX:-}" ] && [ -n "${HOME:-}" ] || fail "doesn't look like Termux (PREFIX or HOME unset)"
-command -v pkg >/dev/null 2>&1 || fail "'pkg' not found — this installer is Termux-only"
-
-step "installing/upgrading required Termux packages (glibc-repo, glibc, patchelf, jq, curl, ripgrep)..."
-# --force-confdef/--force-confold: this runs unattended (no TTY to answer
-# dpkg's "keep your modified conffile?" prompt), so auto-keep the existing
-# config instead of hanging/failing on upgrades like openssl's.
-PKG_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
-pkg install "${PKG_OPTS[@]}" glibc-repo
-pkg update -y
-pkg install "${PKG_OPTS[@]}" glibc patchelf jq curl ripgrep coreutils
-
-[ -e "$LD" ] || fail "glibc loader not found at $LD after installing glibc-repo/glibc — see README troubleshooting"
-
-step "staging self-repair scripts at $DEST ..."
-mkdir -p "$DEST"
-install -m 700 "$REPO_DIR/scripts/autocheck.sh" "$DEST/autocheck.sh"
-install -m 700 "$REPO_DIR/scripts/update.sh"    "$DEST/update.sh"
-install -m 700 "$REPO_DIR/scripts/doctor.sh"    "$DEST/doctor.sh"
-
-step "downloading and patching the claude binary (this reuses update.sh, so the very first install and every later update go through the exact same, already-tested path)..."
-bash "$DEST/update.sh" || fail "initial download/patch failed — see the log printed above, or run: bash $DEST/doctor.sh"
-
-step "installing wrapper at $BIN_DIR/claude ..."
-install -m 700 "$REPO_DIR/scripts/claude-wrapper.sh" "$BIN_DIR/claude"
-
-step "installing termux-update-claude at $BIN_DIR/termux-update-claude ..."
-install -m 700 "$REPO_DIR/scripts/termux-update-claude.sh" "$BIN_DIR/termux-update-claude"
-
-step "wiring autocheck.sh into ~/.bashrc (self-heal + update-check on every new shell)..."
-BASHRC="$HOME/.bashrc"
-touch "$BASHRC"
-if ! grep -qF 'claude-native/autocheck.sh' "$BASHRC"; then
-  printf '\nsource "%s/autocheck.sh"\n' "$DEST" >> "$BASHRC"
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; GREEN=$'\033[32m'
+  BLUE=$'\033[34m'; RESET=$'\033[0m'
+else
+  BOLD=''; DIM=''; RED=''; GREEN=''; BLUE=''; RESET=''
 fi
 
-step "ensuring DISABLE_AUTOUPDATER=1 in ~/.claude/settings.json (blocks the in-process updater from overwriting the patched binary)..."
-mkdir -p "$HOME/.claude"
-SETTINGS="$HOME/.claude/settings.json"
-[ -e "$SETTINGS" ] || echo '{}' > "$SETTINGS"
-settmp=$(mktemp)
-jq '.env.DISABLE_AUTOUPDATER = "1"' "$SETTINGS" > "$settmp" && mv "$settmp" "$SETTINGS"
+on_err() {
+  echo >&2
+  echo "${RED}${BOLD}✗ install.sh failed${RESET} at line $1" >&2
+  echo "${DIM}  see the last output above, or the full log at: $LOG${RESET}" >&2
+}
+trap 'on_err $LINENO' ERR
 
+fail() { echo "${RED}${BOLD}✗ $*${RESET}" >&2; exit 1; }
+
+# step "description" cmd [args...]
+# Prints a numbered, colored banner, then runs the command quietly (logged
+# to $LOG) and shows just ok/FAILED — so apt/dpkg noise doesn't bury the
+# handful of lines that actually matter.
+step() {
+  N=$((N + 1))
+  local desc="$1"; shift
+  printf '%s[%d/%d]%s %s ... ' "${BLUE}${BOLD}" "$N" "$TOTAL" "$RESET" "$desc"
+  if "$@" >>"$LOG" 2>&1; then
+    printf '%sok%s\n' "$GREEN" "$RESET"
+  else
+    local rc=$?
+    printf '%sFAILED%s\n' "$RED" "$RESET"
+    echo "${DIM}--- last 30 lines of $LOG ---${RESET}"
+    tail -n 30 "$LOG"
+    echo "${DIM}-----------------------------${RESET}"
+    exit "$rc"
+  fi
+}
+
+check_platform() {
+  [ "$(uname -m)" = "aarch64" ] || fail "this installer only supports aarch64 (found $(uname -m))"
+  [ -n "${PREFIX:-}" ] && [ -n "${HOME:-}" ] || fail "doesn't look like Termux (PREFIX or HOME unset)"
+  command -v pkg >/dev/null 2>&1 || fail "'pkg' not found — this installer is Termux-only"
+}
+
+install_packages() {
+  # --force-confdef/--force-confold: this runs unattended (no TTY to answer
+  # dpkg's "keep your modified conffile?" prompt), so auto-keep the existing
+  # config instead of hanging/failing on upgrades like openssl's.
+  local opts=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+  pkg install "${opts[@]}" glibc-repo &&
+    pkg update -y &&
+    pkg install "${opts[@]}" glibc patchelf jq curl ripgrep coreutils &&
+    [ -e "$LD" ]
+}
+
+stage_scripts() {
+  mkdir -p "$DEST"
+  install -m 700 "$REPO_DIR/scripts/autocheck.sh" "$DEST/autocheck.sh"
+  install -m 700 "$REPO_DIR/scripts/update.sh"    "$DEST/update.sh"
+  install -m 700 "$REPO_DIR/scripts/doctor.sh"    "$DEST/doctor.sh"
+}
+
+install_wrapper() {
+  install -m 700 "$REPO_DIR/scripts/claude-wrapper.sh" "$BIN_DIR/claude"
+  install -m 700 "$REPO_DIR/scripts/termux-update-claude.sh" "$BIN_DIR/termux-update-claude"
+}
+
+wire_bashrc() {
+  local bashrc="$HOME/.bashrc"
+  touch "$bashrc"
+  grep -qF 'claude-native/autocheck.sh' "$bashrc" ||
+    printf '\nsource "%s/autocheck.sh"\n' "$DEST" >> "$bashrc"
+}
+
+disable_autoupdater() {
+  mkdir -p "$HOME/.claude"
+  local settings="$HOME/.claude/settings.json"
+  [ -e "$settings" ] || echo '{}' > "$settings"
+  local tmp; tmp=$(mktemp)
+  jq '.env.DISABLE_AUTOUPDATER = "1"' "$settings" > "$tmp" && mv "$tmp" "$settings"
+}
+
+echo "${BOLD}claude-code-termux-native${RESET} — installing Claude Code natively on Termux"
 echo
-step "done."
-echo "    Open a NEW Termux session (or run: exec bash) so the wrapper and"
-echo "    autocheck hook take effect, then run: claude"
-echo "    Verify the install anytime with: bash $DEST/doctor.sh"
-echo "    Check for/apply updates by hand with: termux-update-claude"
+
+step "checking platform"                          check_platform
+step "installing Termux packages"                 install_packages
+step "staging self-repair scripts at $DEST"       stage_scripts
+
+# Shown un-suppressed (not via step()): it prints its own clear one-line
+# status ("Already on the latest version" / "Update successful: ..."), and
+# reusing it here means the very first install and every later update go
+# through the exact same, already-tested download/verify/patch path.
+N=$((N + 1))
+printf '%s[%d/%d]%s downloading and patching the claude binary ...\n' "${BLUE}${BOLD}" "$N" "$TOTAL" "$RESET"
+bash "$DEST/update.sh" || fail "initial download/patch failed — run: bash $DEST/doctor.sh"
+
+step "installing wrapper + termux-update-claude"  install_wrapper
+step "wiring autocheck.sh into ~/.bashrc"          wire_bashrc
+step "disabling the in-process autoupdater"        disable_autoupdater
+
+rm -f "$LOG"
+trap - ERR
+echo
+echo "${GREEN}${BOLD}✓ install complete${RESET}"
+echo "  ${DIM}1.${RESET} open a NEW Termux session (or run: exec bash)"
+echo "  ${DIM}2.${RESET} run: ${BOLD}claude${RESET}"
+echo
+echo "  verify anytime  : ${DIM}bash $DEST/doctor.sh${RESET}"
+echo "  check for updates: ${DIM}termux-update-claude${RESET}"
