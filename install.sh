@@ -77,14 +77,17 @@ step "checking platform"                                    check_platform
 step "installing Termux packages"                           install_packages
 step "staging self-repair scripts at $(shortp "$DEST")"     stage_scripts
 
-# Shown un-suppressed (not via step()): it prints its own clear one-line
-# status ("Already on the latest version" / "Update successful: ..."), and
-# reusing it here means the very first install and every later update go
-# through the exact same, already-tested download/verify/patch path.
+# update.sh's own output is shown un-suppressed, printed BEFORE this step's
+# banner (unlike every other step): it prints its own clear one-line status
+# ("Already on the latest version" / "Update successful: ...") and, on an
+# actual download, live progress that can run for minutes — none of which
+# should be hidden in the log like a normal step()'s output. Reusing
+# update.sh here also means the very first install and every later update
+# go through the exact same, already-tested download/verify/patch path.
 N=$((N + 1))
-printf '%s[%d/%d]%s downloading and patching the claude binary ...\n' "${BLUE}${BOLD}" "$N" "$TOTAL" "$RESET"
 bash "$DEST/update.sh" || fail "initial download/patch failed — run: bash $(shortp "$DEST")/doctor.sh"
-printf '      %sok%s\n' "$GREEN" "$RESET"
+step_banner "downloading and patching the claude binary"
+printf '%sok%s\n' "$GREEN" "$RESET"
 
 step "installing wrapper + termux-update-claude"            install_wrapper
 step "wiring autocheck.sh into ~/.bashrc"                    wire_bashrc

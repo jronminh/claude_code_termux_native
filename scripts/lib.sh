@@ -80,14 +80,23 @@ shortp() {
 # of how long each step's description is.
 STEP_DESC_WIDTH=62
 
-# step "description" cmd [args...]
-step() {
-  N=$((N + 1))
-  local desc="$1"; shift
+# step_banner "description" — print just the "[n/N] description ...." part
+# (dot-filled to STEP_DESC_WIDTH), no trailing newline, no ok/FAILED. For
+# steps whose command needs to print its own live output before the
+# ok/FAILED verdict shows — see install.sh's binary-download step.
+step_banner() {
+  local desc="$1"
   local pad=$(( STEP_DESC_WIDTH - ${#desc} ))
   [ "$pad" -lt 1 ] && pad=1
   local dots; dots=$(printf '%*s' "$pad" '' | tr ' ' '.')
   printf '%s[%d/%d]%s %s %s%s%s ' "${BLUE}${BOLD}" "$N" "$TOTAL" "$RESET" "$desc" "$DIM" "$dots" "$RESET"
+}
+
+# step "description" cmd [args...]
+step() {
+  N=$((N + 1))
+  local desc="$1"; shift
+  step_banner "$desc"
   if "$@" >>"$LOG" 2>&1; then
     printf '%sok%s\n' "$GREEN" "$RESET"
   else
