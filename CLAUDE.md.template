@@ -140,12 +140,13 @@ Every line has a load-bearing reason:
      reopen for any fix here to take effect.
 
 ## Future-proofing
-- DISABLE_AUTOUPDATER=1 must always be present in BOTH places: env
-  (wrapper/.bashrc) AND ~/.claude/settings.json. The in-process updater is
-  more stubborn than it looks: blocking one layer still lets it download an
-  unpatched build on top of the patched one → claude dies next launch.
-  ~/.claude/claude-native/autocheck.sh automatically re-adds this key to
-  settings.json if it finds it missing (see "Self-check + self-heal" below).
+- DISABLE_AUTOUPDATER=1 must always be present in BOTH places: exported by
+  the wrapper ($PREFIX/bin/claude) AND set in ~/.claude/settings.json. The
+  in-process updater is more stubborn than it looks: blocking one layer
+  still lets it download an unpatched build on top of the patched one →
+  claude dies next launch. ~/.claude/claude-native/autocheck.sh
+  automatically re-adds the settings.json key if it finds it missing (see
+  "Self-check + self-heal" below); `doctor.sh` checks both places.
 - Updating is NOT a manual step by default — see "Self-check + self-heal"
   below. ~/.claude/claude-native/update.sh --check-only runs automatically
   every time Termux opens and just reports whether a new version exists;

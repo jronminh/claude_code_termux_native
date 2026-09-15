@@ -8,7 +8,7 @@ Patches Claude Code's official `linux-arm64` binary to link against **Termux's o
 
 Anthropic ships `linux-arm64`, not `android-arm64`. Termux runs on Bionic, which that binary can't link against — but Termux also ships a real glibc (`glibc-repo`/`glibc-runner`) for exactly this situation.
 
-The trick: `patchelf --set-interpreter` the binary's ELF interpreter to Termux's `ld-linux-aarch64.so.1`, then invoke it so it gets Termux's glibc libraries **without leaking a glibc environment into the Bionic processes Claude Code itself spawns** (its own Bash tool, `rg`, etc.). That constraint drives most of this repo's complexity — see [Traps encountered](#traps-encountered).
+The trick: `patchelf --set-interpreter` the binary's ELF interpreter to Termux's `ld-linux-aarch64.so.1`, then invoke it so it gets Termux's glibc libraries **without leaking a glibc environment into the Bionic processes Claude Code itself spawns** (its own Bash tool, `rg`, etc.). That constraint drives most of this repo's complexity — see [Troubleshooting](#troubleshooting).
 
 ## Install
 
@@ -63,7 +63,7 @@ To change how any of this works, edit `scripts/` **in this repo** and re-run `in
 - **Update / rollback**: `termux-update-claude` downloads → verifies SHA-256 → patches → installs, swapping in the new binary only after every check passes, with automatic retry/resume if the connection drops mid-download. `--rollback` restores the previous binary (kept as `claude.prev`; a rejected build is kept as `claude.rejected`, not deleted).
 - **`doctor.sh`**: one-shot diagnostic dump (arch, paths, binary/interpreter state, leaked `LD_*` env, autoupdater-disabled check, `--version`) — run this first, before guessing.
 
-## Traps encountered
+## Troubleshooting
 
 Symptom → cause → fix, for the failure modes hit while building this.
 
@@ -114,7 +114,7 @@ Either way, it leaves the Termux packages (`glibc`, `patchelf`, `jq`, `ripgrep`,
 
 ## Contributing
 
-Traps and fixes here came from real breakage, not speculation. Hit a new one on a different Termux/glibc version? A PR adding it to the table (symptom → cause → fix) is exactly the contribution this repo wants.
+The issues and fixes above came from real breakage, not speculation. Hit a new one on a different Termux/glibc version? A PR adding it to the table (symptom → cause → fix) is exactly the contribution this repo wants.
 
 ## License
 

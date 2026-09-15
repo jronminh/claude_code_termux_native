@@ -1,6 +1,7 @@
+# shellcheck shell=bash
 # Shared helpers for install.sh / uninstall.sh — colored, numbered step
 # banners with noisy command output suppressed to a log unless it fails.
-# Meant to be sourced, not executed directly.
+# Meant to be sourced, not executed directly (no shebang, on purpose).
 #
 # Caller must set REPO_DIR, SCRIPT_NAME, and TOTAL before sourcing.
 
@@ -68,6 +69,9 @@ claude_md_remove() {
 # printing; never use the result for actual file operations.
 shortp() {
   local p="$1"
+  # The literal ~ and $PREFIX below are the intended output (display
+  # placeholders), not paths/variables meant to expand.
+  # shellcheck disable=SC2088,SC2016
   case "$p" in
     "$HOME") printf '~' ;;
     "$HOME"/*) printf '~/%s' "${p#"$HOME"/}" ;;

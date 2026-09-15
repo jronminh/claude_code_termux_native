@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Installed to $PREFIX/bin/claude by install.sh.
 # Every line here works around a specific Bionic/glibc conflict — see
-# README.md ("Traps encountered") before changing anything.
+# README.md ("Troubleshooting") before changing anything.
 unset LD_PRELOAD
 export TMPDIR="$HOME/.cache/claude-tmp"
 mkdir -p "$TMPDIR"

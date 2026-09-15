@@ -1,4 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
+# Staged to ~/.claude/claude-native/autocheck.sh by install.sh, sourced from
+# ~/.bashrc on every interactive shell. Self-heals silently, then hands off
+# to update.sh --check-only. See README.md ("Self-check + self-heal").
 BIN="$HOME/.claude/claude-native/claude"
 LD="$PREFIX/glibc/lib/ld-linux-aarch64.so.1"
 WRAPPER="$PREFIX/bin/claude"

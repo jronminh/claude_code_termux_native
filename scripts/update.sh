@@ -1,4 +1,8 @@
 #!/data/data/com.termux/files/usr/bin/bash
+# Staged to ~/.claude/claude-native/update.sh by install.sh (and by
+# install.sh's own first run, to download the initial binary). Invoked as
+# `termux-update-claude` by hand, or with --check-only from autocheck.sh
+# on every new shell. See README.md ("Update / rollback").
 set -uo pipefail
 
 BASE=https://downloads.claude.ai/claude-code-releases
@@ -55,7 +59,7 @@ report_fail() {
     echo "Could not check for updates ($step) — skipping, terminal still works normally."
     exit 0
   fi
-  local logfile="$DEST/update-fail-$(date +%Y%m%d-%H%M%S).log"
+  local logfile; logfile="$DEST/update-fail-$(date +%Y%m%d-%H%M%S).log"
   {
     echo "=== claude-native update.sh FAILED ==="
     echo "Time      : $(date '+%Y-%m-%d %H:%M:%S %z')"
