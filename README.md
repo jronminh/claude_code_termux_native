@@ -1,14 +1,14 @@
 # claude-code-termux-native
 
-Run [Claude Code](https://claude.com/claude-code) **natively** on Termux/Android — no `proot-distro`, no Ubuntu chroot, no emulation layer. It runs Anthropic's official `linux-arm64` build directly on top of Android, by patching the binary to load through Termux's glibc instead of Android's Bionic libc.
+Patches Claude Code's official `linux-arm64` binary to link against **Termux's own glibc** instead of Android's Bionic libc — so it runs natively on Android. No `proot-distro`, no Ubuntu chroot, no emulation layer.
 
-> **Unofficial, community project.** Not affiliated with or endorsed by Anthropic. This repo contains only shell scripts — it does not ship or redistribute the `claude` binary. `install.sh` downloads it at install time straight from Anthropic's own distribution endpoint (`downloads.claude.ai`), the same one the official installer uses, and verifies its SHA-256 against Anthropic's own manifest before ever running it.
+> Unofficial, community project — not affiliated with or endorsed by Anthropic. Ships no binary: `install.sh` downloads it at install time from Anthropic's own `downloads.claude.ai`, the same endpoint the official installer uses, and verifies its SHA-256 against Anthropic's manifest before ever running it.
 
 ## Why this exists
 
-Anthropic publishes a `linux-arm64` build of Claude Code, but no `android-arm64` build. Termux runs on Android's Bionic libc, which that `linux-arm64` binary can't link against directly. Termux separately ships a real glibc (via `glibc-repo`/`glibc-runner`) specifically so glibc-linked Linux binaries can run underneath it.
+Anthropic ships `linux-arm64`, not `android-arm64`. Termux runs on Bionic, which that binary can't link against — but Termux also ships a real glibc (`glibc-repo`/`glibc-runner`) for exactly this situation.
 
-The trick: patch the binary's ELF interpreter (`patchelf --set-interpreter`) to point at Termux's `ld-linux-aarch64.so.1`, and invoke it in a way that gives it Termux's glibc libraries **without leaking a glibc environment into the Bionic processes Claude Code itself spawns** (its own Bash tool, `rg`, etc.). That last constraint is what most of this repo's complexity is about — see [Traps encountered](#traps-encountered) below.
+The trick: `patchelf --set-interpreter` the binary's ELF interpreter to Termux's `ld-linux-aarch64.so.1`, then invoke it so it gets Termux's glibc libraries **without leaking a glibc environment into the Bionic processes Claude Code itself spawns** (its own Bash tool, `rg`, etc.). That constraint drives most of this repo's complexity — see [Traps encountered](#traps-encountered).
 
 ## Install
 
@@ -18,9 +18,7 @@ cd ~/claude-code-termux-native
 bash install.sh
 ```
 
-Run once. It's idempotent, so re-running it (e.g. after a Termux/glibc upgrade) is safe and just re-verifies/re-applies everything.
-
-Then **open a new Termux session** (or `exec bash`) and run:
+Idempotent — safe to re-run any time, e.g. after a Termux/glibc upgrade. Then open a **new** Termux session (or `exec bash`) and run:
 
 ```sh
 claude
@@ -28,14 +26,14 @@ claude
 
 ### What `install.sh` does
 
-1. Verifies you're on `aarch64` Termux.
+1. Checks you're on `aarch64` Termux.
 2. Installs/upgrades `glibc-repo`, `glibc`, `patchelf`, `jq`, `curl`, `ripgrep`, `coreutils`.
-3. Stages `scripts/autocheck.sh`, `scripts/update.sh`, `scripts/doctor.sh` into `~/.claude/claude-native/`.
-4. Runs `update.sh` once to download the current `claude` binary + manifest, verify its checksum, patch its interpreter, and install it — the exact same code path used for every later update.
-5. Installs the wrapper as `$PREFIX/bin/claude` and `termux-update-claude` as `$PREFIX/bin/termux-update-claude`.
-6. Adds `source ~/.claude/claude-native/autocheck.sh` to `~/.bashrc` (self-heal + silent update-check on every new shell).
-7. Sets `DISABLE_AUTOUPDATER=1` in `~/.claude/settings.json` so Claude Code's own in-process updater never overwrites the patched binary with an unpatched one.
-8. Installs [`CLAUDE.md.template`](CLAUDE.md.template) into your **global** `~/.claude/CLAUDE.md`, so claude itself reads about this environment — the traps table below, in Claude's own words — at the start of every session, on every project, without you having to explain it or hit the same failure mode twice. It's inserted between `<!-- claude-code-termux-native:begin/end -->` markers: if that file already has your own content, it's left alone and our section is appended; if you already have our section (from a previous install), it's replaced in place, never duplicated. `uninstall.sh` removes just that section the same way.
+3. Stages `autocheck.sh` / `update.sh` / `doctor.sh` into `~/.claude/claude-native/`.
+4. Runs `update.sh` to download, verify, patch, and install the `claude` binary — the same path every later update uses.
+5. Installs `claude` and `termux-update-claude` into `$PREFIX/bin`.
+6. Hooks `autocheck.sh` into `~/.bashrc` (self-heal + silent update-check on every new shell).
+7. Sets `DISABLE_AUTOUPDATER=1` in `~/.claude/settings.json` so Claude Code's own updater can't overwrite the patched binary.
+8. Merges [`CLAUDE.md.template`](CLAUDE.md.template) into your global `~/.claude/CLAUDE.md`, between `<!-- claude-code-termux-native:begin/end -->` markers — so claude itself knows about this environment from the start of every session, on every project. Appends if you have your own content there; updates in place (never duplicates) on a later install. `uninstall.sh` removes just that section.
 
 ## Layout after install
 
@@ -55,15 +53,15 @@ $PREFIX/bin/termux-update-claude # manual update/rollback command
 ~/.claude/CLAUDE.md              # our section lives inside begin/end markers; rest of the file is yours
 ```
 
-If you need to change how any of this works, edit the copy under `scripts/` **in this repo** and re-run `install.sh` — don't hand-edit the installed copies under `~/.claude/claude-native/`, since a future re-run (or `git pull` + re-run) would overwrite them silently.
+To change how any of this works, edit `scripts/` **in this repo** and re-run `install.sh` — don't hand-edit the installed copies under `~/.claude/claude-native/`; a future re-run overwrites them silently.
 
 ## Extra features (beyond a bare install)
 
-- **Self-heal on every new shell** (`autocheck.sh`): re-adds the execute bit, re-patches the interpreter if something (usually the in-process autoupdater) overwrote it with an unpatched build, re-adds `DISABLE_AUTOUPDATER` if it went missing, warns (without auto-editing) if the wrapper regressed to setting `LD_LIBRARY_PATH` via an environment variable. Silent when there's nothing to fix; only runs on interactive shell startup, never inside a Claude-spawned Bash-tool shell.
-- **Locking**: self-heal and `update.sh`'s install step share one `flock`, so two Termux tabs open at once can't corrupt the binary racing each other — the loser just waits and backs off.
-- **Repatch-frequency escalation**: if the interpreter needs re-patching 2+ times in 24h, `autocheck.sh` escalates to an explicit warning that `DISABLE_AUTOUPDATER` may not actually be holding, instead of silently patching forever with no signal something upstream keeps breaking.
-- **Update / rollback**: `termux-update-claude` checks for and applies updates (download → verify SHA-256 against the manifest → patch → install, only swapping in the new binary after every check passes). `termux-update-claude --rollback` restores the previous binary, keeping the rejected build aside as `claude.rejected` instead of deleting it.
-- **`doctor.sh`**: one-shot diagnostic dump (arch, paths, binary/interpreter state, leaked `LD_*` env, autoupdater-disabled check, `--version`) — run this first, before guessing, whenever something's broken.
+- **Self-heal on every new shell** (`autocheck.sh`): fixes the execute bit, re-patches the interpreter if an unpatched build overwrote it, re-adds `DISABLE_AUTOUPDATER` if it went missing, warns (without auto-editing) if the wrapper regressed to setting `LD_LIBRARY_PATH` via env. Silent when clean; only runs on interactive shell startup, never inside a Claude-spawned Bash-tool shell.
+- **Locking**: self-heal and `update.sh`'s install step share one `flock`, so two Termux tabs open at once can't corrupt the binary racing each other.
+- **Repatch-frequency escalation**: 2+ re-patches in 24h escalates from a quiet fix notice to an explicit warning that `DISABLE_AUTOUPDATER` isn't actually holding.
+- **Update / rollback**: `termux-update-claude` downloads → verifies SHA-256 → patches → installs, swapping in the new binary only after every check passes, with automatic retry/resume if the connection drops mid-download. `--rollback` restores the previous binary (kept as `claude.prev`; a rejected build is kept as `claude.rejected`, not deleted).
+- **`doctor.sh`**: one-shot diagnostic dump (arch, paths, binary/interpreter state, leaked `LD_*` env, autoupdater-disabled check, `--version`) — run this first, before guessing.
 
 ## Traps encountered
 
@@ -100,7 +98,7 @@ termux-update-claude              # check for + apply an update
 termux-update-claude --rollback   # revert to the previously installed binary
 ```
 
-Note: a currently-running `claude` session cannot hot-swap its own binary. Quit and reopen after updating.
+A currently-running `claude` session can't hot-swap its own binary — quit and reopen after updating.
 
 ## Uninstall
 
@@ -110,14 +108,14 @@ bash uninstall.sh          # keeps the downloaded binary cached
 bash uninstall.sh --full   # also deletes the cached binary
 ```
 
-Removes the `claude`/`termux-update-claude` commands, the `~/.bashrc` hook, the `DISABLE_AUTOUPDATER` setting, the self-repair scripts, and our section from `~/.claude/CLAUDE.md` (only what's between its markers — anything else you have in that file is untouched). By default it leaves the downloaded `claude` binary and `manifest.json` cached under `~/.claude/claude-native/`, since that's a ~300MB download — a future `install.sh` run will reuse it instead of fetching it again. Pass `--full` to wipe that cache too.
+Removes `claude` / `termux-update-claude`, the `~/.bashrc` hook, `DISABLE_AUTOUPDATER`, the self-repair scripts, and our section of `~/.claude/CLAUDE.md` (only what's between its markers — anything else in that file is untouched). Keeps the ~300MB binary + `manifest.json` cached by default so a future install skips the download; `--full` wipes that too.
 
-Either way, it deliberately leaves alone the Termux packages `install.sh` installed (`glibc`, `patchelf`, `jq`, `ripgrep`, ...) — those are shared with the rest of Termux, not exclusively this project's to remove — and the cloned repo directory itself, which `uninstall.sh` tells you how to delete by hand if you want it gone too.
+Either way, it leaves the Termux packages (`glibc`, `patchelf`, `jq`, `ripgrep`, ...) and the cloned repo directory alone — neither is exclusively this project's to remove; `uninstall.sh` prints the command if you want them gone too.
 
 ## Contributing
 
-Traps and fixes here came from real breakage, not speculation. If you hit a new one on a different Termux/glibc version, a PR adding it to the table (symptom → cause → fix) is exactly the kind of contribution this repo wants.
+Traps and fixes here came from real breakage, not speculation. Hit a new one on a different Termux/glibc version? A PR adding it to the table (symptom → cause → fix) is exactly the contribution this repo wants.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Applies to the scripts in this repo only; the `claude` binary itself is downloaded from and remains the property of Anthropic, subject to [its own license/terms](https://www.anthropic.com/legal).
+MIT for the scripts — see [LICENSE](LICENSE). The `claude` binary is downloaded from, and remains the property of, Anthropic, under [its own terms](https://www.anthropic.com/legal).
