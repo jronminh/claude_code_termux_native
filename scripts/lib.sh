@@ -16,12 +16,12 @@ fi
 
 on_err() {
   echo >&2
-  echo "${RED}${BOLD}✗ ${SCRIPT_NAME} failed${RESET} at line $1" >&2
+  echo "${RED}${BOLD}${SCRIPT_NAME} failed${RESET} at line $1" >&2
   echo "${DIM}  see the last output above, or the full log at: $LOG${RESET}" >&2
 }
 trap 'on_err $LINENO' ERR
 
-fail() { echo "${RED}${BOLD}✗ $*${RESET}" >&2; exit 1; }
+fail() { echo "${RED}${BOLD}$*${RESET}" >&2; exit 1; }
 
 # step "description" cmd [args...]
 step() {

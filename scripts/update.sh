@@ -16,18 +16,18 @@ tmp=""
 
 if [ "${1:-}" = "--rollback" ]; then
   if [ ! -e "$DEST/claude.prev" ]; then
-    echo "[claude-native] No backup found at $DEST/claude.prev — nothing to roll back to." >&2
+    echo "No backup found at $DEST/claude.prev — nothing to roll back to." >&2
     exit 1
   fi
   exec 203>"$LOCKFILE"
   if ! flock -w 10 203; then
-    echo "[claude-native] Another update/repair is in progress — try rollback again in a moment." >&2
+    echo "Another update/repair is in progress — try rollback again in a moment." >&2
     exit 1
   fi
   mv "$DEST/claude" "$DEST/claude.rejected" 2>/dev/null || true
   mv "$DEST/claude.prev" "$DEST/claude"
   [ -e "$DEST/manifest.json.prev" ] && mv "$DEST/manifest.json.prev" "$DEST/manifest.json"
-  echo "[claude-native] Rolled back to the previous binary. Quit the running claude session and reopen it."
+  echo "Rolled back to the previous binary. Quit the running claude session and reopen it."
   exit 0
 fi
 
@@ -44,7 +44,7 @@ report_fail() {
   if [ "$CHECK_ONLY" = "1" ]; then
     # check-only must not annoy the user with a full report every time
     # Termux opens without network — just one short line, then exit quietly.
-    echo "[claude-native] Could not check for updates ($step) — skipping, terminal still works normally."
+    echo "Could not check for updates ($step) — skipping, terminal still works normally."
     exit 0
   fi
   local logfile="$DEST/update-fail-$(date +%Y%m%d-%H%M%S).log"
@@ -75,8 +75,8 @@ report_fail() {
     df -h "$DEST" 2>&1
   } > "$logfile" 2>&1
   cat "$logfile" >&2
-  echo "[claude-native] update.sh FAILED at step: $step" >&2
-  echo "[claude-native] Full report saved to: $logfile" >&2
+  echo "update.sh FAILED at step: $step" >&2
+  echo "Full report saved to: $logfile" >&2
   [ -n "$tmp" ] && [ -d "$tmp" ] && rm -rf "$tmp"
   exit 1
 }
@@ -116,23 +116,23 @@ if [ -x "$DEST/claude" ] && [ -e "$LD" ]; then
 fi
 
 if [ "$CURRENT" = "$VER" ]; then
-  [ "$CHECK_ONLY" = "1" ] || echo "[claude-native] Already on the latest version ($VER)."
+  [ "$CHECK_ONLY" = "1" ] || echo "Already on the latest version ($VER)."
   exit 0
 fi
 
 if [ "$CHECK_ONLY" = "1" ]; then
-  echo "[claude-native] New update available: ${CURRENT:-<unknown>} -> $VER. Run: termux-update-claude"
+  echo "New version available: $VER. Run: termux-update-claude"
   exit 0
 fi
 
-echo "[claude-native] New version available: ${CURRENT:-<unknown>} -> $VER. Downloading..."
+echo "New version available: $VER. Downloading..."
 
 # Locked from here on: this writes $DEST/claude, the same file autocheck.sh's
 # self-heal may patchelf in place. Same lock file as autocheck.sh so the two
 # never race each other.
 exec 203>"$LOCKFILE"
 if ! flock -w 10 203; then
-  echo "[claude-native] Another update/repair is already running — try again in a moment." >&2
+  echo "Another update/repair is already running — try again in a moment." >&2
   exit 1
 fi
 
@@ -165,6 +165,6 @@ run "install new manifest" mv "$tmp/manifest.json" "$DEST/manifest.json"
 rm -rf "$tmp"
 tmp=""
 
-echo "[claude-native] Update successful: ${CURRENT:-<unknown>} -> $VER."
-echo "[claude-native] Previous binary kept at $DEST/claude.prev — roll back with: termux-update-claude --rollback"
-echo "[claude-native] Quit the running claude session and reopen it to use the new version."
+echo "Update successful: $VER."
+echo "Previous binary kept at $DEST/claude.prev — roll back with: termux-update-claude --rollback"
+echo "Quit the running claude session and reopen it to use the new version."

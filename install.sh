@@ -80,6 +80,7 @@ step "staging self-repair scripts at $DEST"       stage_scripts
 N=$((N + 1))
 printf '%s[%d/%d]%s downloading and patching the claude binary ...\n' "${BLUE}${BOLD}" "$N" "$TOTAL" "$RESET"
 bash "$DEST/update.sh" || fail "initial download/patch failed — run: bash $DEST/doctor.sh"
+printf '      %sok%s\n' "$GREEN" "$RESET"
 
 step "installing wrapper + termux-update-claude"  install_wrapper
 step "wiring autocheck.sh into ~/.bashrc"          wire_bashrc
@@ -88,10 +89,10 @@ step "disabling the in-process autoupdater"        disable_autoupdater
 rm -f "$LOG"
 trap - ERR
 echo
-echo "${GREEN}${BOLD}✓ install complete${RESET}"
+echo "${GREEN}${BOLD}install complete${RESET}"
 echo "  ${DIM}1.${RESET} open a NEW Termux session (or run: exec bash)"
 echo "  ${DIM}2.${RESET} run: ${BOLD}claude${RESET}"
 echo
-echo "  verify anytime  : ${DIM}bash $DEST/doctor.sh${RESET}"
-echo "  check for updates: ${DIM}termux-update-claude${RESET}"
-echo "  uninstall        : ${DIM}bash $REPO_DIR/uninstall.sh${RESET}"
+printf '  %-18s: %s\n' "verify anytime"   "${DIM}bash $DEST/doctor.sh${RESET}"
+printf '  %-18s: %s\n' "check for updates" "${DIM}termux-update-claude${RESET}"
+printf '  %-18s: %s\n' "uninstall"        "${DIM}bash $REPO_DIR/uninstall.sh${RESET}"
