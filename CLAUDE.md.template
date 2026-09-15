@@ -22,4 +22,10 @@ principles.
 
 Quick sanity check anytime, without invoking the skill:
 `bash ~/.claude/claude-native/doctor.sh`
+
+`install.sh` also wires that check into a `SessionStart` hook (see
+`~/.claude/settings.json`), so it already ran once automatically at the
+start of this session — silent if clean. If it found a problem, its full
+output was injected into this session's context already; don't re-run it
+speculatively, just act on what it reported (or invoke the skill).
 <!-- claude-code-termux-native:end -->

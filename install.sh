@@ -14,7 +14,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="install.sh"
-TOTAL=9
+TOTAL=10
 # shellcheck source=scripts/lib.sh
 source "$REPO_DIR/scripts/lib.sh"
 
@@ -70,6 +70,33 @@ disable_autoupdater() {
   jq '.env.DISABLE_AUTOUPDATER = "1"' "$settings" > "$tmp" && mv "$tmp" "$settings"
 }
 
+# Upsert-by-marker: drops any existing SessionStart entry carrying our
+# marker (so a later install.sh run picks up a changed doctor_hook_command
+# instead of leaving a stale copy behind), then appends the current one.
+# Leaves every other hook the user has configured — SessionStart or
+# otherwise — untouched.
+install_doctor_hook() {
+  mkdir -p "$HOME/.claude"
+  local settings="$HOME/.claude/settings.json"
+  if [ -e "$settings" ]; then
+    cp -f "$settings" "$settings.bak"
+  else
+    echo '{}' > "$settings"
+  fi
+  local cmd tmp
+  cmd=$(doctor_hook_command)
+  tmp=$(mktemp)
+  jq --arg cmd "$cmd" --arg marker "$DOCTOR_HOOK_MARKER" '
+    .hooks = ((.hooks // {}) + {
+      SessionStart: (
+        ((.hooks.SessionStart // [])
+          | map(select(((.hooks // []) | map(.command // "") | any(test($marker))) | not)))
+        + [{"hooks": [{"type": "command", "command": $cmd, "timeout": 15, "statusMessage": "Running termux-doctor sanity check..."}]}]
+      )
+    })
+  ' "$settings" > "$tmp" && mv "$tmp" "$settings"
+}
+
 install_claude_md() {
   claude_md_upsert "$REPO_DIR/CLAUDE.md.template" "$HOME/.claude/CLAUDE.md"
 }
@@ -102,6 +129,7 @@ printf '%sok%s\n' "$GREEN" "$RESET"
 step "installing wrapper + termux-update-claude"            install_wrapper
 step "wiring autocheck.sh into ~/.bashrc"                    wire_bashrc
 step "disabling the in-process autoupdater"                  disable_autoupdater
+step "wiring doctor.sh into a SessionStart hook"              install_doctor_hook
 step "installing environment notes into ~/.claude/CLAUDE.md" install_claude_md
 step "installing the termux-doctor skill"                    install_skill
 

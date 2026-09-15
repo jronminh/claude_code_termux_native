@@ -96,6 +96,26 @@ claude_md_remove() {
   ' "$target" > "$target.tmp" && mv "$target.tmp" "$target"
 }
 
+# Marker embedded as a leading comment in the doctor-hook's SessionStart
+# command, so install.sh/uninstall.sh can find and replace/remove exactly
+# our entry via jq (`test($marker)` on the command string) without
+# touching any other SessionStart hooks the user has of their own.
+DOCTOR_HOOK_MARKER="claude-code-termux-native:doctor-hook"
+
+# doctor_hook_command — the SessionStart hook body: runs doctor.sh, stays
+# silent when everything's "ok:", and only surfaces a systemMessage +
+# additionalContext (the full dump) when it spots one of doctor.sh's own
+# problem-vocabulary tokens (MISMATCH:/RISK:/WARN:/MISSING/"not found"/
+# "not patched?"/"could not determine"). autocheck.sh runs standalone on
+# the installed machine with no access to this file, so it carries its own
+# copy of this same heredoc — keep the two in sync by hand if this changes.
+doctor_hook_command() {
+  cat <<'EOF'
+# claude-code-termux-native:doctor-hook
+OUT=$(bash ~/.claude/claude-native/doctor.sh 2>&1); if printf '%s' "$OUT" | grep -qE 'MISMATCH:|RISK:|WARN:|MISSING|not found|not patched\?|could not determine'; then jq -n --arg out "$OUT" '{systemMessage: "termux-doctor flagged possible environment issues at session start — run bash ~/.claude/claude-native/doctor.sh to see them, or invoke the termux-doctor skill", hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $out}}'; fi
+EOF
+}
+
 # shortp PATH — shorten an absolute path for display: $HOME -> ~, $PREFIX ->
 # the literal string "$PREFIX" (the usual Termux convention). Only for
 # printing; never use the result for actual file operations.

@@ -9,6 +9,16 @@ SETTINGS="$HOME/.claude/settings.json"
 LOCKFILE="$HOME/.claude/claude-native/.claude-native.lock"
 HISTORY_FILE="$HOME/.claude/claude-native/.repatch-history"
 
+# Kept in sync by hand with scripts/lib.sh's copy (install.sh/uninstall.sh
+# source that file; this script is staged standalone and can't).
+DOCTOR_HOOK_MARKER="claude-code-termux-native:doctor-hook"
+doctor_hook_command() {
+  cat <<'EOF'
+# claude-code-termux-native:doctor-hook
+OUT=$(bash ~/.claude/claude-native/doctor.sh 2>&1); if printf '%s' "$OUT" | grep -qE 'MISMATCH:|RISK:|WARN:|MISSING|not found|not patched\?|could not determine'; then jq -n --arg out "$OUT" '{systemMessage: "termux-doctor flagged possible environment issues at session start — run bash ~/.claude/claude-native/doctor.sh to see them, or invoke the termux-doctor skill", hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $out}}'; fi
+EOF
+}
+
 # notify TITLE CONTENT — best-effort Termux:API push notification. Silent
 # no-op if termux-api isn't installed (it's optional, not a dependency
 # install.sh pulls in — most users won't have it).
@@ -71,6 +81,27 @@ fi
       jq '.env.DISABLE_AUTOUPDATER = "1"' "$SETTINGS" > "$settmp" && mv "$settmp" "$SETTINGS"
       FIXED=1
       echo "DISABLE_AUTOUPDATER was missing from settings.json — re-added it automatically (previous version backed up to $SETTINGS.bak)."
+    fi
+  fi
+
+  if [ -e "$SETTINGS" ] && command -v jq >/dev/null 2>&1; then
+    HAS_DOCTOR_HOOK=$(jq -r --arg marker "$DOCTOR_HOOK_MARKER" \
+      '[.hooks.SessionStart[]?.hooks[]?.command // "" | test($marker)] | any' \
+      "$SETTINGS" 2>/dev/null || echo false)
+    if [ "$HAS_DOCTOR_HOOK" != "true" ]; then
+      cp -f "$SETTINGS" "$SETTINGS.bak" 2>/dev/null
+      settmp=$(mktemp)
+      jq --arg cmd "$(doctor_hook_command)" --arg marker "$DOCTOR_HOOK_MARKER" '
+        .hooks = ((.hooks // {}) + {
+          SessionStart: (
+            ((.hooks.SessionStart // [])
+              | map(select(((.hooks // []) | map(.command // "") | any(test($marker))) | not)))
+            + [{"hooks": [{"type": "command", "command": $cmd, "timeout": 15, "statusMessage": "Running termux-doctor sanity check..."}]}]
+          )
+        })
+      ' "$SETTINGS" > "$settmp" && mv "$settmp" "$SETTINGS"
+      FIXED=1
+      echo "SessionStart doctor-hook was missing from settings.json — re-added it automatically (previous version backed up to $SETTINGS.bak)."
     fi
   fi
 
