@@ -3,6 +3,7 @@ set -uo pipefail
 
 BASE=https://downloads.claude.ai/claude-code-releases
 DEST="$HOME/.claude/claude-native"
+DEST_SHOW="${DEST/#$HOME/\~}"  # display-only, shortened form of $DEST
 LD="$PREFIX/glibc/lib/ld-linux-aarch64.so.1"
 LOCKFILE="$DEST/.claude-native.lock"
 DOWNLOAD_OPTS=(--connect-timeout 5 --max-time 60)
@@ -11,12 +12,19 @@ DOWNLOAD_OPTS=(--connect-timeout 5 --max-time 60)
 # --speed-limit/--speed-time instead: only abort if throughput actually
 # stalls (stays below 1KB/s for 30s straight), no matter how long the
 # whole transfer takes otherwise.
-BIN_DOWNLOAD_OPTS=(--connect-timeout 5 --speed-limit 1024 --speed-time 30)
+#
+# --retry-all-errors --retry 5 -C -: a flaky mobile link can drop the
+# connection outright (curl exit 56, "Recv failure") partway through a
+# 300MB transfer — not one of the handful of "transient" codes --retry
+# alone treats as retryable, so --retry-all-errors is needed to actually
+# retry on it. -C - resumes from the bytes already on disk instead of
+# restarting from zero, so a drop at 250MB costs seconds, not minutes.
+BIN_DOWNLOAD_OPTS=(--connect-timeout 5 --speed-limit 1024 --speed-time 30 --retry 5 --retry-delay 3 --retry-all-errors -C -)
 tmp=""
 
 if [ "${1:-}" = "--rollback" ]; then
   if [ ! -e "$DEST/claude.prev" ]; then
-    echo "No backup found at $DEST/claude.prev — nothing to roll back to." >&2
+    echo "No backup found at $DEST_SHOW/claude.prev — nothing to roll back to." >&2
     exit 1
   fi
   exec 203>"$LOCKFILE"
@@ -196,5 +204,5 @@ rm -rf "$tmp"
 tmp=""
 
 echo "Update successful: $VER."
-echo "Previous binary kept at $DEST/claude.prev — roll back with: termux-update-claude --rollback"
+echo "Previous binary kept at $DEST_SHOW/claude.prev — roll back with: termux-update-claude --rollback"
 echo "Quit the running claude session and reopen it to use the new version."

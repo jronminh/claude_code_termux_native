@@ -23,11 +23,31 @@ trap 'on_err $LINENO' ERR
 
 fail() { echo "${RED}${BOLD}$*${RESET}" >&2; exit 1; }
 
+# shortp PATH — shorten an absolute path for display: $HOME -> ~, $PREFIX ->
+# the literal string "$PREFIX" (the usual Termux convention). Only for
+# printing; never use the result for actual file operations.
+shortp() {
+  local p="$1"
+  case "$p" in
+    "$HOME") printf '~' ;;
+    "$HOME"/*) printf '~/%s' "${p#"$HOME"/}" ;;
+    "$PREFIX"/*) printf '$PREFIX/%s' "${p#"$PREFIX"/}" ;;
+    *) printf '%s' "$p" ;;
+  esac
+}
+
+# Fixed width so the "ok"/"FAILED" column lines up across steps regardless
+# of how long each step's description is.
+STEP_DESC_WIDTH=62
+
 # step "description" cmd [args...]
 step() {
   N=$((N + 1))
   local desc="$1"; shift
-  printf '%s[%d/%d]%s %s ... ' "${BLUE}${BOLD}" "$N" "$TOTAL" "$RESET" "$desc"
+  local pad=$(( STEP_DESC_WIDTH - ${#desc} ))
+  [ "$pad" -lt 1 ] && pad=1
+  local dots; dots=$(printf '%*s' "$pad" '' | tr ' ' '.')
+  printf '%s[%d/%d]%s %s %s%s%s ' "${BLUE}${BOLD}" "$N" "$TOTAL" "$RESET" "$desc" "$DIM" "$dots" "$RESET"
   if "$@" >>"$LOG" 2>&1; then
     printf '%sok%s\n' "$GREEN" "$RESET"
   else

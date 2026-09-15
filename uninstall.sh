@@ -78,17 +78,17 @@ echo "${GREEN}${BOLD}uninstall complete${RESET}"
 echo "  claude-code-termux-native has been removed."
 echo
 if [ "$FULL" = "1" ]; then
-  echo "  The claude-native binary cache was also removed ($DEST)."
+  echo "  The claude-native binary cache was also removed ($(shortp "$DEST"))."
   echo "  A future install.sh run will re-download the ~300MB binary."
 else
-  echo "  The downloaded binary is still cached at ${DIM}$DEST/claude${RESET} — a future"
-  echo "  install.sh run will reuse it instead of re-downloading ~300MB."
+  echo "  The binary stays cached at ${DIM}$(shortp "$DEST")/claude${RESET} —"
+  echo "  a future install.sh run will reuse it instead of re-downloading ~300MB."
   echo "  Run ${BOLD}bash uninstall.sh --full${RESET} to remove that cache too."
 fi
 echo
 echo "  Not touched (shared with the rest of Termux, not this project's to remove):"
 echo "    - packages: glibc-repo, glibc, patchelf, jq, curl, ripgrep, git, gh"
-echo "    - this cloned repo directory: ${DIM}$REPO_DIR${RESET}"
-echo "      (remove it yourself if you're not planning to reinstall: rm -rf $REPO_DIR)"
+echo "    - this cloned repo directory: ${DIM}$(shortp "$REPO_DIR")${RESET}"
+echo "      (remove it yourself if you're not planning to reinstall: rm -rf $(shortp "$REPO_DIR"))"
 echo
 echo "  Open a NEW Termux session (or run: exec bash) so the removed wrapper/hook take effect."
