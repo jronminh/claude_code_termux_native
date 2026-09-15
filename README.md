@@ -38,7 +38,7 @@ claude
 
 1. Checks you're on `aarch64` Termux.
 2. Installs/upgrades `glibc-repo`, `glibc`, `patchelf`, `jq`, `curl`, `ripgrep`, `coreutils`.
-3. Stages `autocheck.sh` / `update.sh` / `doctor.sh` into `~/.claude/claude-native/`.
+3. Stages `autocheck.sh` / `update.sh` / `doctor.sh` / `session-hooks.sh` into `~/.claude/claude-native/` (the last one is only *wired up* opt-in — see step 12 below — but always staged so `--with-notifications` can be enabled later without a re-download).
 4. Runs `update.sh` to download, verify, patch, and install the `claude` binary — the same path every later update uses.
 5. Installs `claude` and `termux-update-claude` into `$PREFIX/bin`.
 6. Hooks `autocheck.sh` into `~/.bashrc` (self-heal + silent update-check on every new shell).
@@ -47,6 +47,7 @@ claude
 9. Merges [`CLAUDE.md.template`](CLAUDE.md.template) into your global `~/.claude/CLAUDE.md`, between `<!-- claude-code-termux-native:begin/end -->` markers, so claude recognizes this environment from the start of every session. Appends if you have your own content there; updates in place (never duplicates) on a later install. `uninstall.sh` removes just this section.
 10. Installs the [`termux-doctor`](skills/termux-doctor/SKILL.md) skill to `~/.claude/skills/termux-doctor/`. The CLAUDE.md pointer tells claude to invoke it on any symptom from this setup (segfaults, bad ELF errors, patchelf weirdness, ...) instead of guessing — the full trap list and self-repair playbook load only when actually relevant.
 11. Merges [`keybindings.json.template`](keybindings.json.template) into your `~/.claude/keybindings.json` — see [Extra features](#extra-features-beyond-a-bare-install) for what it rebinds and why.
+12. With `--with-notifications`: wires `session-hooks.sh` into the `UserPromptSubmit`/`Stop`/`Notification` hooks (per-turn wake-lock + Termux:API notifications) — see [Extra features](#extra-features-beyond-a-bare-install). Skipped by default.
 
 ## Layout after install
 
