@@ -94,6 +94,36 @@ $out"
   printf '%s' "$out"
 }
 
+# The binary is ~300MB, which can take minutes on a slow link. run() would
+# hide all output until it's done, which looks indistinguishable from
+# hung. Download in the background instead and print how much of $dest has
+# landed on disk so far, so a slow-but-alive transfer is visibly different
+# from a stuck one.
+download_binary() {
+  local url="$1" dest="$2"
+  local errlog; errlog=$(mktemp)
+  curl -fSL "${BIN_DOWNLOAD_OPTS[@]}" -o "$dest" "$url" >"$errlog" 2>&1 &
+  local pid=$! start
+  start=$(date +%s)
+  while kill -0 "$pid" 2>/dev/null; do
+    local size=0 mb elapsed
+    [ -f "$dest" ] && size=$(wc -c < "$dest" 2>/dev/null)
+    mb=$(( ${size:-0} / 1048576 ))
+    elapsed=$(( $(date +%s) - start ))
+    printf '\r  downloading claude binary... %dMB (%ds)   ' "$mb" "$elapsed"
+    sleep 1
+  done
+  wait "$pid"; local rc=$?
+  printf '\r%*s\r' 50 ''
+  if [ $rc -ne 0 ]; then
+    report_fail "download linux-arm64 binary" "Command: curl -fSL ${BIN_DOWNLOAD_OPTS[*]} -o $dest $url
+Exit code: $rc
+Output:
+$(cat "$errlog")"
+  fi
+  rm -f "$errlog"
+}
+
 [ -e "$LD" ] || report_fail "check loader" "Loader not found at $LD — glibc-runner may have changed its path. Run doctor.sh to re-probe."
 
 if [ "$CHECK_ONLY" = "1" ]; then
@@ -138,7 +168,7 @@ fi
 
 tmp=$(mktemp -d)
 
-run "download linux-arm64 binary" curl -fSL "${BIN_DOWNLOAD_OPTS[@]}" -o "$tmp/claude" "$BASE/$VER/linux-arm64/claude" >/dev/null
+download_binary "$BASE/$VER/linux-arm64/claude" "$tmp/claude"
 run "download manifest.json" curl -fSL "${DOWNLOAD_OPTS[@]}" -o "$tmp/manifest.json" "$BASE/$VER/manifest.json" >/dev/null
 
 EXP=$(jq -r '.platforms["linux-arm64"].checksum' "$tmp/manifest.json" 2>/dev/null)
