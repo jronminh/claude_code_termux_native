@@ -13,7 +13,7 @@ The trick: patch the binary's ELF interpreter (`patchelf --set-interpreter`) to 
 ## Install
 
 ```sh
-git clone <this-repo-url> ~/claude-code-termux-native
+git clone https://github.com/jronminh/claude_code_termux_native.git ~/claude-code-termux-native
 cd ~/claude-code-termux-native
 bash install.sh
 ```
