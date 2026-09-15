@@ -8,52 +8,19 @@
 # does not publish an android-arm64 build. See README.md for the full
 # story of why each step below is necessary.
 #
-# Safe to re-run: every step is idempotent.
+# Safe to re-run: every step is idempotent. To undo everything, see
+# uninstall.sh.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_NAME="install.sh"
+TOTAL=7
+# shellcheck source=scripts/lib.sh
+source "$REPO_DIR/scripts/lib.sh"
+
 DEST="$HOME/.claude/claude-native"
 BIN_DIR="$PREFIX/bin"
 LD="$PREFIX/glibc/lib/ld-linux-aarch64.so.1"
-LOG="$(mktemp)"
-TOTAL=7
-N=0
-
-if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-  BOLD=$'\033[1m'; DIM=$'\033[2m'; RED=$'\033[31m'; GREEN=$'\033[32m'
-  BLUE=$'\033[34m'; RESET=$'\033[0m'
-else
-  BOLD=''; DIM=''; RED=''; GREEN=''; BLUE=''; RESET=''
-fi
-
-on_err() {
-  echo >&2
-  echo "${RED}${BOLD}✗ install.sh failed${RESET} at line $1" >&2
-  echo "${DIM}  see the last output above, or the full log at: $LOG${RESET}" >&2
-}
-trap 'on_err $LINENO' ERR
-
-fail() { echo "${RED}${BOLD}✗ $*${RESET}" >&2; exit 1; }
-
-# step "description" cmd [args...]
-# Prints a numbered, colored banner, then runs the command quietly (logged
-# to $LOG) and shows just ok/FAILED — so apt/dpkg noise doesn't bury the
-# handful of lines that actually matter.
-step() {
-  N=$((N + 1))
-  local desc="$1"; shift
-  printf '%s[%d/%d]%s %s ... ' "${BLUE}${BOLD}" "$N" "$TOTAL" "$RESET" "$desc"
-  if "$@" >>"$LOG" 2>&1; then
-    printf '%sok%s\n' "$GREEN" "$RESET"
-  else
-    local rc=$?
-    printf '%sFAILED%s\n' "$RED" "$RESET"
-    echo "${DIM}--- last 30 lines of $LOG ---${RESET}"
-    tail -n 30 "$LOG"
-    echo "${DIM}-----------------------------${RESET}"
-    exit "$rc"
-  fi
-}
 
 check_platform() {
   [ "$(uname -m)" = "aarch64" ] || fail "this installer only supports aarch64 (found $(uname -m))"
@@ -127,3 +94,4 @@ echo "  ${DIM}2.${RESET} run: ${BOLD}claude${RESET}"
 echo
 echo "  verify anytime  : ${DIM}bash $DEST/doctor.sh${RESET}"
 echo "  check for updates: ${DIM}termux-update-claude${RESET}"
+echo "  uninstall        : ${DIM}bash $REPO_DIR/uninstall.sh${RESET}"

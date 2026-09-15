@@ -6,6 +6,12 @@ DEST="$HOME/.claude/claude-native"
 LD="$PREFIX/glibc/lib/ld-linux-aarch64.so.1"
 LOCKFILE="$DEST/.claude-native.lock"
 DOWNLOAD_OPTS=(--connect-timeout 5 --max-time 60)
+# The claude binary is ~300MB. A flat --max-time is wrong for it on a slow
+# mobile link — it aborts a download that's merely slow, not dead. Use
+# --speed-limit/--speed-time instead: only abort if throughput actually
+# stalls (stays below 1KB/s for 30s straight), no matter how long the
+# whole transfer takes otherwise.
+BIN_DOWNLOAD_OPTS=(--connect-timeout 5 --speed-limit 1024 --speed-time 30)
 tmp=""
 
 if [ "${1:-}" = "--rollback" ]; then
@@ -132,7 +138,7 @@ fi
 
 tmp=$(mktemp -d)
 
-run "download linux-arm64 binary" curl -fSL "${DOWNLOAD_OPTS[@]}" -o "$tmp/claude" "$BASE/$VER/linux-arm64/claude" >/dev/null
+run "download linux-arm64 binary" curl -fSL "${BIN_DOWNLOAD_OPTS[@]}" -o "$tmp/claude" "$BASE/$VER/linux-arm64/claude" >/dev/null
 run "download manifest.json" curl -fSL "${DOWNLOAD_OPTS[@]}" -o "$tmp/manifest.json" "$BASE/$VER/manifest.json" >/dev/null
 
 EXP=$(jq -r '.platforms["linux-arm64"].checksum' "$tmp/manifest.json" 2>/dev/null)

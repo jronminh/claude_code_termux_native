@@ -102,11 +102,11 @@ Note: a currently-running `claude` session cannot hot-swap its own binary. Quit 
 ## Uninstall
 
 ```sh
-rm -rf ~/.claude/claude-native
-rm -f "$PREFIX/bin/claude" "$PREFIX/bin/termux-update-claude"
-sed -i '\#claude-native/autocheck.sh#d' ~/.bashrc
-jq 'del(.env.DISABLE_AUTOUPDATER)' ~/.claude/settings.json > /tmp/s.json && mv /tmp/s.json ~/.claude/settings.json
+cd ~/claude-code-termux-native   # wherever you cloned it
+bash uninstall.sh
 ```
+
+Removes everything `install.sh` created: the patched binary and self-repair scripts (`~/.claude/claude-native/`), the `claude`/`termux-update-claude` commands, the `~/.bashrc` hook, and the `DISABLE_AUTOUPDATER` setting. It deliberately leaves alone the Termux packages `install.sh` installed (`glibc`, `patchelf`, `jq`, `ripgrep`, ...) — those are shared with the rest of Termux, not exclusively this project's to remove — and the cloned repo directory itself, which `uninstall.sh` tells you how to delete by hand if you want it gone too.
 
 ## Contributing
 
