@@ -14,7 +14,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="install.sh"
-TOTAL=7
+TOTAL=8
 # shellcheck source=scripts/lib.sh
 source "$REPO_DIR/scripts/lib.sh"
 
@@ -66,6 +66,10 @@ disable_autoupdater() {
   jq '.env.DISABLE_AUTOUPDATER = "1"' "$settings" > "$tmp" && mv "$tmp" "$settings"
 }
 
+install_claude_md() {
+  claude_md_upsert "$REPO_DIR/CLAUDE.md.template" "$HOME/.claude/CLAUDE.md"
+}
+
 echo "${BOLD}claude-code-termux-native${RESET} — installing Claude Code natively on Termux"
 echo
 
@@ -85,6 +89,7 @@ printf '      %sok%s\n' "$GREEN" "$RESET"
 step "installing wrapper + termux-update-claude"            install_wrapper
 step "wiring autocheck.sh into ~/.bashrc"                    wire_bashrc
 step "disabling the in-process autoupdater"                  disable_autoupdater
+step "installing environment notes into ~/.claude/CLAUDE.md" install_claude_md
 
 rm -f "$LOG"
 trap - ERR
@@ -96,3 +101,6 @@ echo
 printf '  %-18s: %s\n' "verify anytime"    "${DIM}bash $(shortp "$DEST")/doctor.sh${RESET}"
 printf '  %-18s: %s\n' "check for updates" "${DIM}termux-update-claude${RESET}"
 printf '  %-18s: %s\n' "uninstall"         "${DIM}bash $(shortp "$REPO_DIR")/uninstall.sh${RESET}"
+echo
+echo "  Environment notes were also added to ~/.claude/CLAUDE.md, so claude"
+echo "  recognizes this setup (and its quirks) on its own from now on."

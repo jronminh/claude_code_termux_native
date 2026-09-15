@@ -35,6 +35,7 @@ claude
 5. Installs the wrapper as `$PREFIX/bin/claude` and `termux-update-claude` as `$PREFIX/bin/termux-update-claude`.
 6. Adds `source ~/.claude/claude-native/autocheck.sh` to `~/.bashrc` (self-heal + silent update-check on every new shell).
 7. Sets `DISABLE_AUTOUPDATER=1` in `~/.claude/settings.json` so Claude Code's own in-process updater never overwrites the patched binary with an unpatched one.
+8. Installs [`CLAUDE.md.template`](CLAUDE.md.template) into your **global** `~/.claude/CLAUDE.md`, so claude itself reads about this environment — the traps table below, in Claude's own words — at the start of every session, on every project, without you having to explain it or hit the same failure mode twice. It's inserted between `<!-- claude-code-termux-native:begin/end -->` markers: if that file already has your own content, it's left alone and our section is appended; if you already have our section (from a previous install), it's replaced in place, never duplicated. `uninstall.sh` removes just that section the same way.
 
 ## Layout after install
 
@@ -50,6 +51,8 @@ claude
 
 $PREFIX/bin/claude               # wrapper — what actually runs when you type `claude`
 $PREFIX/bin/termux-update-claude # manual update/rollback command
+
+~/.claude/CLAUDE.md              # our section lives inside begin/end markers; rest of the file is yours
 ```
 
 If you need to change how any of this works, edit the copy under `scripts/` **in this repo** and re-run `install.sh` — don't hand-edit the installed copies under `~/.claude/claude-native/`, since a future re-run (or `git pull` + re-run) would overwrite them silently.
@@ -107,7 +110,7 @@ bash uninstall.sh          # keeps the downloaded binary cached
 bash uninstall.sh --full   # also deletes the cached binary
 ```
 
-Removes the `claude`/`termux-update-claude` commands, the `~/.bashrc` hook, the `DISABLE_AUTOUPDATER` setting, and the self-repair scripts. By default it leaves the downloaded `claude` binary and `manifest.json` cached under `~/.claude/claude-native/`, since that's a ~300MB download — a future `install.sh` run will reuse it instead of fetching it again. Pass `--full` to wipe that cache too.
+Removes the `claude`/`termux-update-claude` commands, the `~/.bashrc` hook, the `DISABLE_AUTOUPDATER` setting, the self-repair scripts, and our section from `~/.claude/CLAUDE.md` (only what's between its markers — anything else you have in that file is untouched). By default it leaves the downloaded `claude` binary and `manifest.json` cached under `~/.claude/claude-native/`, since that's a ~300MB download — a future `install.sh` run will reuse it instead of fetching it again. Pass `--full` to wipe that cache too.
 
 Either way, it deliberately leaves alone the Termux packages `install.sh` installed (`glibc`, `patchelf`, `jq`, `ripgrep`, ...) — those are shared with the rest of Termux, not exclusively this project's to remove — and the cloned repo directory itself, which `uninstall.sh` tells you how to delete by hand if you want it gone too.
 

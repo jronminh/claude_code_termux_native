@@ -22,7 +22,7 @@ esac
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="uninstall.sh"
-TOTAL=4
+TOTAL=5
 # shellcheck source=scripts/lib.sh
 source "$REPO_DIR/scripts/lib.sh"
 
@@ -59,6 +59,10 @@ remove_settings_key() {
   jq 'del(.env.DISABLE_AUTOUPDATER)' "$settings" > "$tmp" && mv "$tmp" "$settings"
 }
 
+remove_claude_md() {
+  claude_md_remove "$HOME/.claude/CLAUDE.md"
+}
+
 echo "${BOLD}claude-code-termux-native${RESET} — uninstalling"
 echo
 
@@ -70,6 +74,7 @@ fi
 step "removing claude + termux-update-claude from \$PREFIX/bin"       remove_wrapper
 step "removing the autocheck hook from ~/.bashrc"                     remove_bashrc_hook
 step "removing DISABLE_AUTOUPDATER from ~/.claude/settings.json"      remove_settings_key
+step "removing our section from ~/.claude/CLAUDE.md"                  remove_claude_md
 
 rm -f "$LOG"
 trap - ERR
