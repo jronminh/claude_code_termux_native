@@ -16,6 +16,8 @@ Anthropic ships `linux-arm64`, not `android-arm64`. Termux runs on Bionic, which
 
 The trick: `patchelf --set-interpreter` the binary's ELF interpreter to Termux's `ld-linux-aarch64.so.1`, then invoke it so it gets Termux's glibc libraries **without leaking a glibc environment into the Bionic processes Claude Code itself spawns** (its own Bash tool, `rg`, etc.). That constraint drives most of this repo's complexity — see [Troubleshooting](#troubleshooting).
 
+One consequence: Claude Code ships its own in-process autoupdater that silently downloads and swaps in a fresh `linux-arm64` binary — a stock, **unpatched** one. Left alone, it would eventually overwrite our patched binary with a build that can't run on Bionic at all (Troubleshooting #4), breaking `claude` with no warning. So this repo turns that autoupdater off (`DISABLE_AUTOUPDATER=1`, see below) and replaces it end-to-end with its own path — `termux-update-claude` — which downloads the same official binary, verifies its checksum against Anthropic's manifest, `patchelf`-patches it, *then* installs it, so a working patched build is never replaced with a broken one. `autocheck.sh` backs that up on every new shell: if something (a stray update, a settings reset) ever manages to overwrite the binary or turn the flag back on, it's silently re-patched and re-disabled before you'd notice.
+
 ## Install
 
 ```sh
@@ -38,7 +40,7 @@ claude
 4. Runs `update.sh` to download, verify, patch, and install the `claude` binary — the same path every later update uses.
 5. Installs `claude` and `termux-update-claude` into `$PREFIX/bin`.
 6. Hooks `autocheck.sh` into `~/.bashrc` (self-heal + silent update-check on every new shell).
-7. Sets `DISABLE_AUTOUPDATER=1` in `~/.claude/settings.json` so Claude Code's own updater can't overwrite the patched binary.
+7. Sets `DISABLE_AUTOUPDATER=1` in `~/.claude/settings.json` — turns off Claude Code's built-in autoupdater so it can never silently drop in an unpatched binary and break `claude` (see "Why this exists" above); `termux-update-claude` is the replacement update path from here on.
 8. Wires `doctor.sh` into a `SessionStart` hook in `~/.claude/settings.json`, so the sanity check runs automatically at the start of every Claude Code session — silent when clean, only speaking up (via `additionalContext` + a warning) when it spots a real problem. Upserted by a marker comment in the hook command, so a later install.sh run replaces just our entry and never touches any other hooks you've configured yourself.
 9. Merges [`CLAUDE.md.template`](CLAUDE.md.template) into your global `~/.claude/CLAUDE.md`, between `<!-- claude-code-termux-native:begin/end -->` markers — a short pointer so claude recognizes this environment from the start of every session, on every project. Appends if you have your own content there; updates in place (never duplicates) on a later install. `uninstall.sh` removes just that section.
 10. Installs the [`termux-doctor`](skills/termux-doctor/SKILL.md) skill to `~/.claude/skills/termux-doctor/`. The CLAUDE.md pointer tells claude to invoke it whenever it hits a symptom from this setup (segfaults, bad ELF errors, grep/patchelf weirdness, ...) instead of guessing — the skill carries the full trap list and self-repair playbook, loaded only when actually relevant rather than in every conversation's context.
@@ -111,12 +113,14 @@ bash ~/.claude/claude-native/doctor.sh
 
 ## Updating
 
+Claude Code's own autoupdater is disabled (`DISABLE_AUTOUPDATER=1`, see "Why this exists" above) — it would otherwise install a stock binary that can't run on Bionic. `termux-update-claude` is the replacement: it downloads the same official release, verifies its SHA-256 against Anthropic's manifest, patches it, and only then installs it, so `claude` never ends up on a broken binary mid-update.
+
 ```sh
 termux-update-claude              # check for + apply an update
 termux-update-claude --rollback   # revert to the previously installed binary
 ```
 
-A currently-running `claude` session can't hot-swap its own binary — quit and reopen after updating.
+A currently-running `claude` session can't hot-swap its own binary — quit and reopen after updating. The next session then recognizes the change on its own — see "Update recognition" above.
 
 ## Uninstall
 
