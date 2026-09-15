@@ -158,7 +158,26 @@ else
 fi
 emit disk_space "== disk space free at \$HOME ==" "$DISK_MSG"
 
-emit version "== version ==" "$(claude --version 2>/dev/null || echo "claude does not run — see items above")"
+VER_OUT=$(claude --version 2>/dev/null)
+if [ -z "$VER_OUT" ]; then
+  VERSION_MSG="claude does not run — see items above"
+else
+  VER_STATE="$HOME/.claude/claude-native/.last-claude-version"
+  PREV_SEEN="" LAST_SEEN=""
+  if [ -f "$VER_STATE" ]; then
+    PREV_SEEN=$(sed -n '1p' "$VER_STATE")
+    LAST_SEEN=$(sed -n '2p' "$VER_STATE")
+  fi
+  VERSION_MSG="$VER_OUT"
+  if [ -n "$LAST_SEEN" ] && [ "$LAST_SEEN" != "$VER_OUT" ]; then
+    VERSION_MSG="$VER_OUT"$'\n'"UPDATED: claude binary changed since the last session-start check (was: $LAST_SEEN) — this session is running a different build than last time"
+    PREV_SEEN="$LAST_SEEN"
+  fi
+  if [ -n "$LAST_SEEN" ] && [ "$LAST_SEEN" != "$VER_OUT" ] || [ -z "$LAST_SEEN" ]; then
+    { printf '%s\n' "$PREV_SEEN"; printf '%s\n' "$VER_OUT"; } > "$VER_STATE" 2>/dev/null
+  fi
+fi
+emit version "== version (recognizes a binary change since the last session-start check) ==" "$VERSION_MSG"
 
 if [ "$JSON" = "1" ]; then
   JOBJ='{}'

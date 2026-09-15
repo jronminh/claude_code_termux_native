@@ -28,4 +28,15 @@ Quick sanity check anytime, without invoking the skill:
 start of this session — silent if clean. If it found a problem, its full
 output was injected into this session's context already; don't re-run it
 speculatively, just act on what it reported (or invoke the skill).
+
+That same hook also recognizes when the `claude` binary itself is a
+different build than the one running last session (e.g. after
+`termux-update-claude`): its output carries a line starting `UPDATED:`
+naming the previous version. If you see that in this session's start
+context, mention the version change to the user in your first reply
+(old → new) — that's the whole point of the check, don't stay silent
+about it just because it isn't an error. `doctor.sh` also keeps the last
+two observed `claude --version` strings in
+`~/.claude/claude-native/.last-claude-version` (previous, then current)
+if you need to double check.
 <!-- claude-code-termux-native:end -->

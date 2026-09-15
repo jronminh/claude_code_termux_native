@@ -15,7 +15,7 @@ DOCTOR_HOOK_MARKER="claude-code-termux-native:doctor-hook"
 doctor_hook_command() {
   cat <<'EOF'
 # claude-code-termux-native:doctor-hook
-OUT=$(bash ~/.claude/claude-native/doctor.sh 2>&1); if printf '%s' "$OUT" | grep -qE 'MISMATCH:|RISK:|WARN:|MISSING|not found|not patched\?|could not determine'; then jq -n --arg out "$OUT" '{systemMessage: "termux-doctor flagged possible environment issues at session start — run bash ~/.claude/claude-native/doctor.sh to see them, or invoke the termux-doctor skill", hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $out}}'; fi
+OUT=$(bash ~/.claude/claude-native/doctor.sh 2>&1); if printf '%s' "$OUT" | grep -qE 'MISMATCH:|RISK:|WARN:|MISSING|not found|not patched\?|could not determine|UPDATED:'; then jq -n --arg out "$OUT" '{systemMessage: "termux-doctor has something to report at session start — run bash ~/.claude/claude-native/doctor.sh to see it, or invoke the termux-doctor skill", hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $out}}'; fi
 EOF
 }
 
