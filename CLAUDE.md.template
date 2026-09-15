@@ -139,31 +139,43 @@ Every line has a load-bearing reason:
      whatever `CLAUDE_CODE_EXECPATH` was set to at startup — fully quit and
      reopen for any fix here to take effect.
 9. claude segfaults immediately on launch, no useful error
-   → Android's seccomp policy allows the older epoll_pwait syscall but often
-     still blocks the newer epoll_pwait2 (Linux 5.11+) even on kernels well
-     past that version — the allowlist is curated per-syscall, not
-     auto-updated for every syscall a new kernel adds. claude's bundled Bun
-     calls it anyway, gets ENOSYS, and its event loop (bun-usockets) doesn't
-     check for that failure — a null-pointer dereference follows. Confirmed
-     in the wild: OPPO CPH2499, Android 16, kernel 5.15.180
-     (github.com/oven-sh/bun/issues/32489, closed "not planned" upstream —
-     this is permanent, not "wait for the next Bun release").
-   → Critical nuance: kernel version is fixed at the device's ORIGINAL
-     manufacture (Android's KMI ties vendor kernel modules — GPU, camera,
-     modem drivers — to one specific kernel build; rebasing to a newer
-     kernel means recertifying all of them, which vendors avoid). An OS
-     upgrade via OTA does NOT change the kernel. A phone can show "Android
-     16" in Settings while still running the exact kernel it shipped with
-     on Android 12 years earlier. So: never infer this risk from the
-     Android version shown in Settings — always check the real kernel with
-     `uname -r` (risk zone: 5.11+) or `doctor.sh`, which checks this
-     automatically.
-   → No fix exists in this repo or its scripts — would need an LD_PRELOAD
-     shim intercepting syscall 441 (epoll_pwait2 on aarch64) and
-     redirecting it to epoll_pwait, real systems programming. If you hit
-     this, github.com/gtbuchanan/claude-code-termux ships a working one.
-     install.sh and doctor.sh only detect and warn about the risk zone —
-     do not tell the user this is fixed or being worked on.
+   → NOT actually a seccomp block. The real bug (confirmed by Bun's own
+     maintainer via strace, github.com/oven-sh/bun/issues/32489): on kernels
+     that report >=5.11, Bun's event loop attempts epoll_pwait2 through
+     glibc's generic syscall() wrapper — and in this patched-ELF/
+     Termux-glibc-runner environment, that wrapper itself faults on a TLS
+     access before the actual syscall instruction ever executes. strace on
+     a real crash (OPPO CPH2499, Android 16, kernel 5.15.180) shows no
+     epoll_pwait/epoll_pwait2 entry at all before the SIGSEGV — seccomp
+     never gets a chance to allow or deny anything.
+   → FIXED upstream in oven-sh/bun#32490: (a) the syscall is now issued via
+     raw inline asm, removing the TLS-dependent generic wrapper entirely;
+     (b) the kernel-version gate (`Bun__isEpollPwait2SupportedOnLinuxKernel`)
+     now also skips epoll_pwait2 whenever the `uname` release string
+     contains "-android", regardless of the numeric version; (c) a new
+     `BUN_FEATURE_FLAG_DISABLE_EPOLL_PWAIT2=1` env var force-disables it.
+     Whether a given install is safe now depends on the bundled Bun
+     version, not just kernel version — check with
+     `strings ~/.claude/claude-native/claude | grep -q BUN_FEATURE_FLAG_DISABLE_EPOLL_PWAIT2`
+     (doctor.sh does this automatically). Confirmed present as of Claude
+     Code 2.1.236.
+   → Critical nuance (still true, keep this): kernel version is fixed at the
+     device's ORIGINAL manufacture (Android's KMI ties vendor kernel
+     modules — GPU, camera, modem drivers — to one specific kernel build;
+     rebasing to a newer kernel means recertifying all of them, which
+     vendors avoid). An OS upgrade via OTA does NOT change the kernel. A
+     phone can show "Android 16" in Settings while still running the exact
+     kernel it shipped with on Android 12 years earlier. So: never infer
+     this risk from the Android version shown in Settings — always check
+     the real kernel with `uname -r` (risk zone: 5.11+) or `doctor.sh`.
+   → Belt-and-suspenders: the wrapper also exports
+     `BUN_FEATURE_FLAG_DISABLE_EPOLL_PWAIT2=1` unconditionally — harmless on
+     a patched Bun (flag already forces the same safe path) and a real
+     safety net on any older bundled Bun that predates the upstream fix.
+     If a user still hits this crash despite the flag (old Claude Code
+     version, flag string absent from the binary per doctor.sh), a real
+     LD_PRELOAD shim is the fallback — github.com/gtbuchanan/claude-code-termux
+     ships a working one.
 
 ## Future-proofing
 - DISABLE_AUTOUPDATER=1 must always be present in BOTH places: exported by
