@@ -24,6 +24,26 @@ trap 'on_err $LINENO' ERR
 
 fail() { echo "${RED}${BOLD}$*${RESET}" >&2; exit 1; }
 
+# kernel_is_risky — true (exit 0) if the running kernel is >= 5.11, the
+# version above which Android's seccomp policy often still lacks
+# epoll_pwait2 (added in Linux 5.11) even though it allows the older
+# epoll_pwait. Bun (which claude-code bundles) doesn't check for the
+# resulting ENOSYS and segfaults at launch. Detection only — nothing here
+# fixes it. See README ("Troubleshooting") for the full writeup and
+# sources. Kernel version is fixed at the device's original manufacture
+# (Android's KMI ties vendor kernel modules to one kernel build), so an
+# OS upgrade via OTA does NOT change it — the Android version shown in
+# Settings tells you nothing here; only the real kernel does.
+kernel_is_risky() {
+  local kver kmajor kminor
+  kver=$(uname -r)
+  kmajor=$(printf '%s' "$kver" | cut -d. -f1)
+  kminor=$(printf '%s' "$kver" | cut -d. -f2)
+  [ "$kmajor" -eq "$kmajor" ] 2>/dev/null || return 1
+  [ "$kminor" -eq "$kminor" ] 2>/dev/null || return 1
+  [ "$kmajor" -gt 5 ] || { [ "$kmajor" -eq 5 ] && [ "$kminor" -ge 11 ]; }
+}
+
 # Markers delimiting our managed block inside the user's global
 # ~/.claude/CLAUDE.md, which may contain unrelated content of their own
 # above/below it that must never be touched.

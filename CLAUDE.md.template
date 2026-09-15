@@ -138,6 +138,32 @@ Every line has a load-bearing reason:
    → As with trap #1, a currently-running claude session already inherited
      whatever `CLAUDE_CODE_EXECPATH` was set to at startup — fully quit and
      reopen for any fix here to take effect.
+9. claude segfaults immediately on launch, no useful error
+   → Android's seccomp policy allows the older epoll_pwait syscall but often
+     still blocks the newer epoll_pwait2 (Linux 5.11+) even on kernels well
+     past that version — the allowlist is curated per-syscall, not
+     auto-updated for every syscall a new kernel adds. claude's bundled Bun
+     calls it anyway, gets ENOSYS, and its event loop (bun-usockets) doesn't
+     check for that failure — a null-pointer dereference follows. Confirmed
+     in the wild: OPPO CPH2499, Android 16, kernel 5.15.180
+     (github.com/oven-sh/bun/issues/32489, closed "not planned" upstream —
+     this is permanent, not "wait for the next Bun release").
+   → Critical nuance: kernel version is fixed at the device's ORIGINAL
+     manufacture (Android's KMI ties vendor kernel modules — GPU, camera,
+     modem drivers — to one specific kernel build; rebasing to a newer
+     kernel means recertifying all of them, which vendors avoid). An OS
+     upgrade via OTA does NOT change the kernel. A phone can show "Android
+     16" in Settings while still running the exact kernel it shipped with
+     on Android 12 years earlier. So: never infer this risk from the
+     Android version shown in Settings — always check the real kernel with
+     `uname -r` (risk zone: 5.11+) or `doctor.sh`, which checks this
+     automatically.
+   → No fix exists in this repo or its scripts — would need an LD_PRELOAD
+     shim intercepting syscall 441 (epoll_pwait2 on aarch64) and
+     redirecting it to epoll_pwait, real systems programming. If you hit
+     this, github.com/gtbuchanan/claude-code-termux ships a working one.
+     install.sh and doctor.sh only detect and warn about the risk zone —
+     do not tell the user this is fixed or being worked on.
 
 ## Future-proofing
 - DISABLE_AUTOUPDATER=1 must always be present in BOTH places: exported by

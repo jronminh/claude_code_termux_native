@@ -107,3 +107,14 @@ printf '  %-18s: %s\n' "uninstall"         "${DIM}bash $(shortp "$REPO_DIR")/uni
 echo
 echo "  Environment notes were also added to ~/.claude/CLAUDE.md, so claude"
 echo "  recognizes this setup (and its quirks) on its own from now on."
+
+if kernel_is_risky; then
+  echo
+  echo "${DIM}note:${RESET} kernel $(uname -r) is 5.11+. Android's seccomp policy often"
+  echo "  still lacks the newer epoll_pwait2 syscall even on kernels this new, and"
+  echo "  claude's bundled Bun runtime doesn't handle that gracefully — a segfault"
+  echo "  right at launch on some devices. This is not something install.sh can fix"
+  echo "  (needs an LD_PRELOAD syscall shim); if claude crashes immediately, see"
+  echo "  README.md (\"Troubleshooting\") for the full writeup, or"
+  echo "  https://github.com/gtbuchanan/claude-code-termux, which ships one."
+fi
