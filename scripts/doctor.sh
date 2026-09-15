@@ -117,6 +117,13 @@ else
 fi
 emit termux_api "== Termux:API notifications ==" "$TERMUX_API_MSG"
 
+if grep -qs 'claude-code-termux-native:session-hooks' "$HOME/.claude/settings.json" 2>/dev/null; then
+  SESSION_HOOKS_MSG="ok: wired (per-turn wake-lock + notifications) — installed with install.sh --with-notifications"
+else
+  SESSION_HOOKS_MSG="not wired — optional, opt-in. Run: bash install.sh --with-notifications (see README)"
+fi
+emit session_hooks "== Optional session hooks (wake-lock/notifications) ==" "$SESSION_HOOKS_MSG"
+
 TT_VER=$(dpkg -s termux-tools 2>/dev/null | awk -F': ' '/^Version/{print $2}')
 APT_SRC=$(cat "$PREFIX"/etc/apt/sources.list 2>/dev/null; cat "$PREFIX"/etc/apt/sources.list.d/*.list 2>/dev/null)
 if printf '%s' "$APT_SRC" | grep -q 'termux\.dev'; then

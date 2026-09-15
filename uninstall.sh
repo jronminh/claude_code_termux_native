@@ -22,7 +22,7 @@ esac
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="uninstall.sh"
-TOTAL=7
+TOTAL=8
 # shellcheck source=scripts/lib.sh
 source "$REPO_DIR/scripts/lib.sh"
 
@@ -36,6 +36,7 @@ remove_claude_native() {
     # Keep claude/claude.prev/manifest.json* cached — they're the expensive
     # (~300MB) part to reproduce. Just clear out what made them "live".
     rm -f "$DEST"/autocheck.sh "$DEST"/update.sh "$DEST"/doctor.sh \
+          "$DEST"/session-hooks.sh \
           "$DEST"/.claude-native.lock "$DEST"/.repatch-history \
           "$DEST"/.doctor-last-versions "$DEST"/update-fail-*.log
   fi
@@ -74,6 +75,24 @@ remove_doctor_hook() {
   ' "$settings" > "$tmp" && mv "$tmp" "$settings"
 }
 
+remove_session_hooks() {
+  local settings="$HOME/.claude/settings.json"
+  [ -e "$settings" ] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  cp -f "$settings" "$settings.bak"
+  local tmp; tmp=$(mktemp)
+  jq --arg marker "$SESSION_HOOKS_MARKER" '
+    def drop_ours(arr): arr | map(select(((.hooks // []) | map(.command // "") | any(test($marker))) | not));
+    .hooks.UserPromptSubmit = drop_ours(.hooks.UserPromptSubmit // [])
+    | .hooks.Stop = drop_ours(.hooks.Stop // [])
+    | .hooks.Notification = drop_ours(.hooks.Notification // [])
+    | if (.hooks.UserPromptSubmit | length) == 0 then del(.hooks.UserPromptSubmit) else . end
+    | if (.hooks.Stop | length) == 0 then del(.hooks.Stop) else . end
+    | if (.hooks.Notification | length) == 0 then del(.hooks.Notification) else . end
+    | if ((.hooks // {}) | length) == 0 then del(.hooks) else . end
+  ' "$settings" > "$tmp" && mv "$tmp" "$settings"
+}
+
 remove_claude_md() {
   claude_md_remove "$HOME/.claude/CLAUDE.md"
 }
@@ -94,6 +113,7 @@ step "removing claude + termux-update-claude from \$PREFIX/bin"       remove_wra
 step "removing the autocheck hook from ~/.bashrc"                     remove_bashrc_hook
 step "removing DISABLE_AUTOUPDATER from ~/.claude/settings.json"      remove_settings_key
 step "removing the doctor-hook SessionStart entry"                    remove_doctor_hook
+step "removing the optional session hooks (wake-lock/notifications)"  remove_session_hooks
 step "removing our section from ~/.claude/CLAUDE.md"                  remove_claude_md
 step "removing the termux-doctor skill"                               remove_skill
 

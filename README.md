@@ -26,7 +26,9 @@ cd ~/claude-code-termux-native
 bash install.sh
 ```
 
-Idempotent — safe to re-run any time, e.g. after a Termux/glibc upgrade. Then open a **new** Termux session (or `exec bash`) and run:
+Idempotent — safe to re-run any time, e.g. after a Termux/glibc upgrade. Add `--with-notifications` to also wire the optional [session hooks](#extra-features-beyond-a-bare-install) (per-turn wake-lock + Termux:API notifications) — off by default since, unlike everything else `install.sh` does, it changes day-to-day interactive behavior rather than fixing the execution path itself.
+
+Then open a **new** Termux session (or `exec bash`) and run:
 
 ```sh
 claude
@@ -54,6 +56,7 @@ claude
   autocheck.sh          # self-heal, runs on every new Termux shell via .bashrc
   update.sh             # download/verify/patch/install + rollback
   doctor.sh             # diagnostic dump — run this first when something's broken
+  session-hooks.sh      # optional Termux:API hooks (wake-lock + notifications), only wired with --with-notifications
   .claude-native.lock    # flock used by autocheck.sh and update.sh so they never race
   .repatch-history       # timestamps of automatic re-patches (see below)
   .last-claude-version   # last two `claude --version` strings seen by doctor.sh (previous, current) — powers update recognition at session start
@@ -77,10 +80,15 @@ To change how any of this works, edit `scripts/` **in this repo** and re-run `in
 - **Update / rollback**: `termux-update-claude` downloads → verifies SHA-256 → patches → installs, swapping in the new binary only once every check passes, with automatic retry/resume on a dropped connection. `--rollback` restores the previous binary (kept as `claude.prev`; a rejected build is kept as `claude.rejected`, not deleted).
 - **`settings.json` backup**: `install.sh`, `autocheck.sh`, and `uninstall.sh` each back up `~/.claude/settings.json` to `settings.json.bak` before touching the `DISABLE_AUTOUPDATER` key or the `doctor.sh` hook. Restore with `cp ~/.claude/settings.json.bak ~/.claude/settings.json`; `doctor.sh` reports backup status.
 - **Termux:API notifications** (optional — `pkg install termux-api` + the Termux:API app, not installed by `install.sh`): if `termux-notification` is available, a real update failure or a repatch-frequency escalation each push a notification, so they're not missed in a backgrounded tab. `doctor.sh` reports whether this is wired up.
-- **`doctor.sh`**: one-shot diagnostic dump — arch/ABI cross-check (catches binary-translation layers), kernel `epoll_pwait2` risk (checked against whether the *installed binary* carries the upstream fix, not just the kernel version), paths, binary/interpreter state, leaked `LD_*` env, autoupdater-disabled check, `settings.json` backup status, Termux:API wiring, Termux build freshness (flags a likely stale/Play-Store install), glibc/patchelf version drift, `$HOME` `noexec` check, free disk space, and `--version` (with update recognition). Run this first, before guessing.
+- **`doctor.sh`**: one-shot diagnostic dump — arch/ABI cross-check (catches binary-translation layers), kernel `epoll_pwait2` risk (checked against whether the *installed binary* carries the upstream fix, not just the kernel version), paths, binary/interpreter state, leaked `LD_*` env, autoupdater-disabled check, `settings.json` backup status, Termux:API wiring, optional session-hooks wiring, Termux build freshness (flags a likely stale/Play-Store install), glibc/patchelf version drift, `$HOME` `noexec` check, free disk space, and `--version` (with update recognition). Run this first, before guessing.
   - `doctor.sh --json` — the same checks as one JSON object (needs `jq`), for scripting.
   - `doctor.sh --fix` — runs the same locked self-heal block as `autocheck.sh`, then the normal dump, on demand instead of only at shell startup.
 - **`termux-doctor` skill**: the trap list, self-repair design, and golden rules live in a Claude Code skill (`~/.claude/skills/termux-doctor/`) instead of every session's context via CLAUDE.md — claude invokes it on demand when it recognizes a symptom from this setup.
+- **Session hooks** (opt-in — `install.sh --with-notifications`, `scripts/session-hooks.sh`): wires three Claude Code hooks to Termux:API so the phone tells you things without you watching the terminal.
+  - `UserPromptSubmit` → `termux-wake-lock`, `Stop` → `termux-wake-unlock`: holds a wake lock only while Claude is actually working on a turn, so Android doesn't throttle/kill a long-running task in the background when the screen locks. Needs only bare Termux — no Termux:API app required.
+  - `Notification` (matcher: `permission_prompt|idle_prompt|agent_needs_input|agent_completed`) → a `termux-notification`, so a permission prompt or an idle wait doesn't go unnoticed off-screen.
+  - `Stop` also pushes a "task finished" notification, but only if the turn ran 60+ seconds — short back-and-forth chat stays quiet.
+  - Both notification paths need `pkg install termux-api` + the Termux:API app; `doctor.sh` reports whether they're wired and whether Termux:API is available. Every action is best-effort and never blocks a turn (hooks always exit 0 — there's no documented safe way to recover a blocked `Stop` hook, so this repo doesn't try).
 
 ## Troubleshooting
 
@@ -130,7 +138,7 @@ bash uninstall.sh          # keeps the downloaded binary cached
 bash uninstall.sh --full   # also deletes the cached binary
 ```
 
-Removes `claude` / `termux-update-claude`, the `~/.bashrc` hook, `DISABLE_AUTOUPDATER`, the `doctor.sh` hook, the self-repair scripts, the `termux-doctor` skill, and our section of `~/.claude/CLAUDE.md` (only what's between its markers). Keeps the ~300MB binary + `manifest.json` cached by default so a future install skips the download; `--full` wipes that too.
+Removes `claude` / `termux-update-claude`, the `~/.bashrc` hook, `DISABLE_AUTOUPDATER`, the `doctor.sh` hook, the optional session hooks (if `--with-notifications` was ever used), the self-repair scripts, the `termux-doctor` skill, and our section of `~/.claude/CLAUDE.md` (only what's between its markers). Keeps the ~300MB binary + `manifest.json` cached by default so a future install skips the download; `--full` wipes that too.
 
 Leaves the Termux packages (`glibc`, `patchelf`, `jq`, `ripgrep`, ...) and the cloned repo directory alone either way — neither is exclusively this project's to remove; `uninstall.sh` prints the command if you want them gone too.
 
