@@ -1,8 +1,14 @@
 # claude-code-termux-native
 
+[![License](https://img.shields.io/github/license/jronminh/claude_code_termux_native)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Android%20aarch64-3DDC84)
+![Shell](https://img.shields.io/badge/shell-bash-4EAA25?logo=gnubash&logoColor=white)
+
 Patches Claude Code's official `linux-arm64` binary to link against **Termux's own glibc** instead of Android's Bionic libc — so it runs natively on Android. No `proot-distro`, no Ubuntu chroot, no emulation layer.
 
 > Unofficial, community project — not affiliated with or endorsed by Anthropic. Ships no binary: `install.sh` downloads it at install time from Anthropic's own `downloads.claude.ai`, the same endpoint the official installer uses, and verifies its SHA-256 against Anthropic's manifest before ever running it.
+
+![install.sh running in Termux, all 8 steps completing successfully](assets/demo.gif)
 
 ## Why this exists
 
