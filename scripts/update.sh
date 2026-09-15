@@ -26,6 +26,15 @@ DOWNLOAD_OPTS=(--connect-timeout 5 --max-time 60)
 BIN_DOWNLOAD_OPTS=(--connect-timeout 5 --speed-limit 1024 --speed-time 30 --retry 5 --retry-delay 3 --retry-all-errors -C -)
 tmp=""
 
+# notify TITLE CONTENT — best-effort Termux:API push notification. Silent
+# no-op if termux-api isn't installed (it's optional, not a dependency
+# install.sh pulls in — most users won't have it). Useful here because a
+# real (non-check-only) update can run for minutes in a backgrounded tab.
+notify() {
+  command -v termux-notification >/dev/null 2>&1 || return 0
+  termux-notification --title "$1" --content "$2" 2>/dev/null || true
+}
+
 if [ "${1:-}" = "--rollback" ]; then
   if [ ! -e "$DEST/claude.prev" ]; then
     echo "No backup found at $DEST_SHOW/claude.prev — nothing to roll back to." >&2
@@ -89,6 +98,7 @@ report_fail() {
   cat "$logfile" >&2
   echo "update.sh FAILED at step: $step" >&2
   echo "Full report saved to: $logfile" >&2
+  notify "claude-native: update failed" "Failed at: $step — see $logfile"
   [ -n "$tmp" ] && [ -d "$tmp" ] && rm -rf "$tmp"
   exit 1
 }

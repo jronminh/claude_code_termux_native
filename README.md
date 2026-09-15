@@ -39,7 +39,8 @@ claude
 5. Installs `claude` and `termux-update-claude` into `$PREFIX/bin`.
 6. Hooks `autocheck.sh` into `~/.bashrc` (self-heal + silent update-check on every new shell).
 7. Sets `DISABLE_AUTOUPDATER=1` in `~/.claude/settings.json` so Claude Code's own updater can't overwrite the patched binary.
-8. Merges [`CLAUDE.md.template`](CLAUDE.md.template) into your global `~/.claude/CLAUDE.md`, between `<!-- claude-code-termux-native:begin/end -->` markers — so claude itself knows about this environment from the start of every session, on every project. Appends if you have your own content there; updates in place (never duplicates) on a later install. `uninstall.sh` removes just that section.
+8. Merges [`CLAUDE.md.template`](CLAUDE.md.template) into your global `~/.claude/CLAUDE.md`, between `<!-- claude-code-termux-native:begin/end -->` markers — a short pointer so claude recognizes this environment from the start of every session, on every project. Appends if you have your own content there; updates in place (never duplicates) on a later install. `uninstall.sh` removes just that section.
+9. Installs the [`termux-doctor`](skills/termux-doctor/SKILL.md) skill to `~/.claude/skills/termux-doctor/`. The CLAUDE.md pointer tells claude to invoke it whenever it hits a symptom from this setup (segfaults, bad ELF errors, grep/patchelf weirdness, ...) instead of guessing — the skill carries the full trap list and self-repair playbook, loaded only when actually relevant rather than in every conversation's context.
 
 ## Layout after install
 
@@ -57,6 +58,7 @@ $PREFIX/bin/claude               # wrapper — what actually runs when you type 
 $PREFIX/bin/termux-update-claude # manual update/rollback command
 
 ~/.claude/CLAUDE.md              # our section lives inside begin/end markers; rest of the file is yours
+~/.claude/skills/termux-doctor/SKILL.md   # full trap list + self-repair playbook, invoked on demand
 ```
 
 To change how any of this works, edit `scripts/` **in this repo** and re-run `install.sh` — don't hand-edit the installed copies under `~/.claude/claude-native/`; a future re-run overwrites them silently.
@@ -67,7 +69,12 @@ To change how any of this works, edit `scripts/` **in this repo** and re-run `in
 - **Locking**: self-heal and `update.sh`'s install step share one `flock`, so two Termux tabs open at once can't corrupt the binary racing each other.
 - **Repatch-frequency escalation**: 2+ re-patches in 24h escalates from a quiet fix notice to an explicit warning that `DISABLE_AUTOUPDATER` isn't actually holding.
 - **Update / rollback**: `termux-update-claude` downloads → verifies SHA-256 → patches → installs, swapping in the new binary only after every check passes, with automatic retry/resume if the connection drops mid-download. `--rollback` restores the previous binary (kept as `claude.prev`; a rejected build is kept as `claude.rejected`, not deleted).
-- **`doctor.sh`**: one-shot diagnostic dump (arch, kernel `epoll_pwait2` risk check, paths, binary/interpreter state, leaked `LD_*` env, autoupdater-disabled check, `--version`) — run this first, before guessing.
+- **`settings.json` backup**: every time `install.sh`, `autocheck.sh`, or `uninstall.sh` is about to change `~/.claude/settings.json` (the `DISABLE_AUTOUPDATER` key), it backs up the current file to `settings.json.bak` first. Restore with `cp ~/.claude/settings.json.bak ~/.claude/settings.json`; `doctor.sh` reports whether a backup exists and when it was taken.
+- **Termux:API notifications** (optional — `pkg install termux-api` + the Termux:API app, not installed by `install.sh`): if `termux-notification` is available, a real (non-check-only) update failure and a repatch-frequency escalation (2+ re-patches in 24h) each push a notification, so they're not missed in a backgrounded tab. `doctor.sh` reports whether this is wired up.
+- **`doctor.sh`**: one-shot diagnostic dump — arch, an ABI cross-check (`uname -m` vs Android's reported ABI, catches binary-translation layers), kernel `epoll_pwait2` risk check (cross-checked against whether the *installed binary* actually carries the upstream fix, not just the kernel version), paths, binary/interpreter state, leaked `LD_*` env, autoupdater-disabled check, `settings.json` backup status, whether Termux:API notifications are wired up, Termux build freshness (`TERMUX_VERSION`, `termux-tools` version, apt mirror — flags a likely stale/Play-Store install), glibc/patchelf version drift since the last run, `$HOME` mount `noexec` check, free disk space, `--version`. Run this first, before guessing.
+  - `doctor.sh --json` — the same checks as one JSON object (needs `jq`), for scripting.
+  - `doctor.sh --fix` — runs the same locked self-heal block `autocheck.sh` runs on every new shell (chmod, re-patch, re-add `DISABLE_AUTOUPDATER`), then the normal dump, as an explicit on-demand command instead of only at shell startup.
+- **`termux-doctor` skill**: the trap list, self-repair design, and golden rules above live in a Claude Code skill (`~/.claude/skills/termux-doctor/`) instead of bloating every session's context via CLAUDE.md — claude invokes it on demand when it recognizes a symptom from this setup.
 
 ## Troubleshooting
 
@@ -115,7 +122,7 @@ bash uninstall.sh          # keeps the downloaded binary cached
 bash uninstall.sh --full   # also deletes the cached binary
 ```
 
-Removes `claude` / `termux-update-claude`, the `~/.bashrc` hook, `DISABLE_AUTOUPDATER`, the self-repair scripts, and our section of `~/.claude/CLAUDE.md` (only what's between its markers — anything else in that file is untouched). Keeps the ~300MB binary + `manifest.json` cached by default so a future install skips the download; `--full` wipes that too.
+Removes `claude` / `termux-update-claude`, the `~/.bashrc` hook, `DISABLE_AUTOUPDATER`, the self-repair scripts, the `termux-doctor` skill, and our section of `~/.claude/CLAUDE.md` (only what's between its markers — anything else in that file is untouched). Keeps the ~300MB binary + `manifest.json` cached by default so a future install skips the download; `--full` wipes that too.
 
 Either way, it leaves the Termux packages (`glibc`, `patchelf`, `jq`, `ripgrep`, ...) and the cloned repo directory alone — neither is exclusively this project's to remove; `uninstall.sh` prints the command if you want them gone too.
 

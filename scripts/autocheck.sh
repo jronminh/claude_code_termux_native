@@ -9,6 +9,14 @@ SETTINGS="$HOME/.claude/settings.json"
 LOCKFILE="$HOME/.claude/claude-native/.claude-native.lock"
 HISTORY_FILE="$HOME/.claude/claude-native/.repatch-history"
 
+# notify TITLE CONTENT — best-effort Termux:API push notification. Silent
+# no-op if termux-api isn't installed (it's optional, not a dependency
+# install.sh pulls in — most users won't have it).
+notify() {
+  command -v termux-notification >/dev/null 2>&1 || return 0
+  termux-notification --title "$1" --content "$2" 2>/dev/null || true
+}
+
 unset LD_PRELOAD LD_LIBRARY_PATH
 
 mkdir -p "$HOME/.cache/claude-tmp"
@@ -48,6 +56,7 @@ fi
       RECENT=$(awk -v now="$NOW" '{ if (now - $1 < 86400) c++ } END { print c+0 }' "$HISTORY_FILE" 2>/dev/null)
       if [ "${RECENT:-0}" -ge 2 ] 2>/dev/null; then
         echo "WARNING: the binary has needed re-patching ${RECENT} times in the last 24h — DISABLE_AUTOUPDATER may not actually be holding. Check settings.json and whether the in-process updater is still active." >&2
+        notify "claude-native: repeated re-patching" "Re-patched ${RECENT}x in 24h — DISABLE_AUTOUPDATER may not be holding. Run doctor.sh."
       fi
     else
       echo "Binary could not be patched (may segfault on launch) — try grun or update.sh." >&2
@@ -57,10 +66,11 @@ fi
   if [ -e "$SETTINGS" ] && command -v jq >/dev/null 2>&1; then
     HAS_FLAG=$(jq -r '.env.DISABLE_AUTOUPDATER // empty' "$SETTINGS" 2>/dev/null || true)
     if [ "$HAS_FLAG" != "1" ]; then
+      cp -f "$SETTINGS" "$SETTINGS.bak" 2>/dev/null
       settmp=$(mktemp)
       jq '.env.DISABLE_AUTOUPDATER = "1"' "$SETTINGS" > "$settmp" && mv "$settmp" "$SETTINGS"
       FIXED=1
-      echo "DISABLE_AUTOUPDATER was missing from settings.json — re-added it automatically."
+      echo "DISABLE_AUTOUPDATER was missing from settings.json — re-added it automatically (previous version backed up to $SETTINGS.bak)."
     fi
   fi
 

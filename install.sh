@@ -14,7 +14,7 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="install.sh"
-TOTAL=8
+TOTAL=9
 # shellcheck source=scripts/lib.sh
 source "$REPO_DIR/scripts/lib.sh"
 
@@ -61,13 +61,23 @@ wire_bashrc() {
 disable_autoupdater() {
   mkdir -p "$HOME/.claude"
   local settings="$HOME/.claude/settings.json"
-  [ -e "$settings" ] || echo '{}' > "$settings"
+  if [ -e "$settings" ]; then
+    cp -f "$settings" "$settings.bak"
+  else
+    echo '{}' > "$settings"
+  fi
   local tmp; tmp=$(mktemp)
   jq '.env.DISABLE_AUTOUPDATER = "1"' "$settings" > "$tmp" && mv "$tmp" "$settings"
 }
 
 install_claude_md() {
   claude_md_upsert "$REPO_DIR/CLAUDE.md.template" "$HOME/.claude/CLAUDE.md"
+}
+
+install_skill() {
+  local dir="$HOME/.claude/skills/termux-doctor"
+  mkdir -p "$dir"
+  install -m 600 "$REPO_DIR/skills/termux-doctor/SKILL.md" "$dir/SKILL.md"
 }
 
 echo "${BOLD}claude-code-termux-native${RESET} — installing Claude Code natively on Termux"
@@ -93,6 +103,7 @@ step "installing wrapper + termux-update-claude"            install_wrapper
 step "wiring autocheck.sh into ~/.bashrc"                    wire_bashrc
 step "disabling the in-process autoupdater"                  disable_autoupdater
 step "installing environment notes into ~/.claude/CLAUDE.md" install_claude_md
+step "installing the termux-doctor skill"                    install_skill
 
 rm -f "$LOG"
 trap - ERR
@@ -105,16 +116,16 @@ printf '  %-18s: %s\n' "verify anytime"    "${DIM}bash $(shortp "$DEST")/doctor.
 printf '  %-18s: %s\n' "check for updates" "${DIM}termux-update-claude${RESET}"
 printf '  %-18s: %s\n' "uninstall"         "${DIM}bash $(shortp "$REPO_DIR")/uninstall.sh${RESET}"
 echo
-echo "  Environment notes were also added to ~/.claude/CLAUDE.md, so claude"
-echo "  recognizes this setup (and its quirks) on its own from now on."
+echo "  Environment notes were also added to ~/.claude/CLAUDE.md, and the"
+echo "  termux-doctor skill was installed, so claude recognizes this setup"
+echo "  (and its quirks) and knows how to self-diagnose from now on."
 
-if kernel_is_risky; then
+if kernel_is_risky && ! epoll_fix_present "$DEST/claude"; then
   echo
-  echo "${DIM}note:${RESET} kernel $(uname -r) is 5.11+. Android's seccomp policy often"
-  echo "  still lacks the newer epoll_pwait2 syscall even on kernels this new, and"
-  echo "  claude's bundled Bun runtime doesn't handle that gracefully — a segfault"
-  echo "  right at launch on some devices. This is not something install.sh can fix"
-  echo "  (needs an LD_PRELOAD syscall shim); if claude crashes immediately, see"
-  echo "  README.md (\"Troubleshooting\") for the full writeup, or"
-  echo "  https://github.com/gtbuchanan/claude-code-termux, which ships one."
+  echo "${DIM}note:${RESET} kernel $(uname -r) is 5.11+, and this build of claude predates"
+  echo "  the upstream fix for a Bun TLS-fault crash on epoll_pwait2 (bun#32490) —"
+  echo "  claude may segfault right at launch on some devices. The wrapper already"
+  echo "  sets BUN_FEATURE_FLAG_DISABLE_EPOLL_PWAIT2=1 as a workaround; if it still"
+  echo "  crashes, see README.md (\"Troubleshooting\" #9) or"
+  echo "  https://github.com/gtbuchanan/claude-code-termux, which ships an LD_PRELOAD shim."
 fi

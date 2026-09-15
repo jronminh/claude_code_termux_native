@@ -24,16 +24,21 @@ trap 'on_err $LINENO' ERR
 
 fail() { echo "${RED}${BOLD}$*${RESET}" >&2; exit 1; }
 
-# kernel_is_risky — true (exit 0) if the running kernel is >= 5.11, the
-# version above which Android's seccomp policy often still lacks
-# epoll_pwait2 (added in Linux 5.11) even though it allows the older
-# epoll_pwait. Bun (which claude-code bundles) doesn't check for the
-# resulting ENOSYS and segfaults at launch. Detection only — nothing here
-# fixes it. See README ("Troubleshooting") for the full writeup and
-# sources. Kernel version is fixed at the device's original manufacture
-# (Android's KMI ties vendor kernel modules to one kernel build), so an
-# OS upgrade via OTA does NOT change it — the Android version shown in
-# Settings tells you nothing here; only the real kernel does.
+# kernel_is_risky — true (exit 0) if the running kernel is >= 5.11. NOT a
+# seccomp block: strace on a real crash shows no epoll_pwait2 syscall entry
+# before the SIGSEGV. Bun's kernel-version gate decides at that threshold
+# whether to attempt epoll_pwait2 at all, and routing that attempt through
+# glibc's generic syscall() wrapper — in this patched-ELF/glibc-runner
+# environment — faults on a TLS access before the syscall instruction ever
+# runs. Fixed upstream in oven-sh/bun#32490 (raw-asm syscall, an
+# "-android" release-string gate, and BUN_FEATURE_FLAG_DISABLE_EPOLL_PWAIT2).
+# So this function alone only tells you the kernel is in the risk *zone* —
+# pair it with epoll_fix_present() to know whether the installed binary
+# actually needs to worry about it. See README ("Troubleshooting" #9).
+# Kernel version is fixed at the device's original manufacture (Android's
+# KMI ties vendor kernel modules to one kernel build), so an OS upgrade via
+# OTA does NOT change it — the Android version shown in Settings tells you
+# nothing here; only the real kernel does.
 kernel_is_risky() {
   local kver kmajor kminor
   kver=$(uname -r)
@@ -42,6 +47,13 @@ kernel_is_risky() {
   [ "$kmajor" -eq "$kmajor" ] 2>/dev/null || return 1
   [ "$kminor" -eq "$kminor" ] 2>/dev/null || return 1
   [ "$kmajor" -gt 5 ] || { [ "$kmajor" -eq 5 ] && [ "$kminor" -ge 11 ]; }
+}
+
+# epoll_fix_present BINARY — true if BINARY carries the upstream fix for
+# the epoll_pwait2 TLS-fault crash (oven-sh/bun#32490): the feature-flag
+# string is only linked in on a Bun build that has the fix.
+epoll_fix_present() {
+  strings "$1" 2>/dev/null | grep -q BUN_FEATURE_FLAG_DISABLE_EPOLL_PWAIT2
 }
 
 # Markers delimiting our managed block inside the user's global

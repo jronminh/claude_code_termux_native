@@ -22,7 +22,7 @@ esac
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="uninstall.sh"
-TOTAL=5
+TOTAL=6
 # shellcheck source=scripts/lib.sh
 source "$REPO_DIR/scripts/lib.sh"
 
@@ -37,7 +37,7 @@ remove_claude_native() {
     # (~300MB) part to reproduce. Just clear out what made them "live".
     rm -f "$DEST"/autocheck.sh "$DEST"/update.sh "$DEST"/doctor.sh \
           "$DEST"/.claude-native.lock "$DEST"/.repatch-history \
-          "$DEST"/update-fail-*.log
+          "$DEST"/.doctor-last-versions "$DEST"/update-fail-*.log
   fi
 }
 
@@ -55,12 +55,17 @@ remove_settings_key() {
   local settings="$HOME/.claude/settings.json"
   [ -e "$settings" ] || return 0
   command -v jq >/dev/null 2>&1 || return 0
+  cp -f "$settings" "$settings.bak"
   local tmp; tmp=$(mktemp)
   jq 'del(.env.DISABLE_AUTOUPDATER)' "$settings" > "$tmp" && mv "$tmp" "$settings"
 }
 
 remove_claude_md() {
   claude_md_remove "$HOME/.claude/CLAUDE.md"
+}
+
+remove_skill() {
+  rm -rf "$HOME/.claude/skills/termux-doctor"
 }
 
 echo "${BOLD}claude-code-termux-native${RESET} — uninstalling"
@@ -75,6 +80,7 @@ step "removing claude + termux-update-claude from \$PREFIX/bin"       remove_wra
 step "removing the autocheck hook from ~/.bashrc"                     remove_bashrc_hook
 step "removing DISABLE_AUTOUPDATER from ~/.claude/settings.json"      remove_settings_key
 step "removing our section from ~/.claude/CLAUDE.md"                  remove_claude_md
+step "removing the termux-doctor skill"                               remove_skill
 
 rm -f "$LOG"
 trap - ERR
