@@ -46,6 +46,7 @@ claude
 8. Wires `doctor.sh` into a `SessionStart` hook — runs automatically at the start of every session, silent when clean, speaks up only on a real problem. Upserted via a marker comment, so later `install.sh` runs replace just this entry and leave any other hooks you've set up alone.
 9. Merges [`CLAUDE.md.template`](CLAUDE.md.template) into your global `~/.claude/CLAUDE.md`, between `<!-- claude-code-termux-native:begin/end -->` markers, so claude recognizes this environment from the start of every session. Appends if you have your own content there; updates in place (never duplicates) on a later install. `uninstall.sh` removes just this section.
 10. Installs the [`termux-doctor`](skills/termux-doctor/SKILL.md) skill to `~/.claude/skills/termux-doctor/`. The CLAUDE.md pointer tells claude to invoke it on any symptom from this setup (segfaults, bad ELF errors, patchelf weirdness, ...) instead of guessing — the full trap list and self-repair playbook load only when actually relevant.
+11. Merges [`keybindings.json.template`](keybindings.json.template) into your `~/.claude/keybindings.json` — see [Extra features](#extra-features-beyond-a-bare-install) for what it rebinds and why.
 
 ## Layout after install
 
@@ -66,6 +67,7 @@ $PREFIX/bin/termux-update-claude # manual update/rollback command
 
 ~/.claude/CLAUDE.md              # our section lives inside begin/end markers; rest of the file is yours
 ~/.claude/skills/termux-doctor/SKILL.md   # full trap list + self-repair playbook, invoked on demand
+~/.claude/keybindings.json        # our rebinds merged in by value (no comment syntax to hang markers off), tracked via claude-native/.keybindings-managed.json
 ```
 
 To change how any of this works, edit `scripts/` **in this repo** and re-run `install.sh` — don't hand-edit the installed copies under `~/.claude/claude-native/`; a future re-run overwrites them silently.
@@ -84,6 +86,13 @@ To change how any of this works, edit `scripts/` **in this repo** and re-run `in
   - `doctor.sh --json` — the same checks as one JSON object (needs `jq`), for scripting.
   - `doctor.sh --fix` — runs the same locked self-heal block as `autocheck.sh`, then the normal dump, on demand instead of only at shell startup.
 - **`termux-doctor` skill**: the trap list, self-repair design, and golden rules live in a Claude Code skill (`~/.claude/skills/termux-doctor/`) instead of every session's context via CLAUDE.md — claude invokes it on demand when it recognizes a symptom from this setup.
+- **Termux-friendly keybindings** (default, not opt-in — [`keybindings.json.template`](keybindings.json.template), `install.sh` step 11): Termux's default extra-keys row has no Shift key, and CTRL/ALT are only reachable as a tap-then-key (not held), so a few of Claude Code's default bindings don't work at all, or need an awkward two-tap `ctrl+x`-chord within a 1-second window. Merged into `~/.claude/keybindings.json` as single `alt+key` alternatives instead:
+  - `alt+m` → `chat:cycleMode` (default `shift+tab` — unreachable, no Shift key)
+  - `alt+b` → `app:toggleBrief` (default `ctrl+shift+b` — same problem)
+  - `alt+left`/`alt+right`/`alt+up`/`alt+down`/`alt+home`/`alt+end` → `selection:extendLeft/Right/Up/Down/LineStart/LineEnd` (default `shift+arrow`/`shift+home`/`shift+end` — same problem; lets you select terminal text to copy without a Shift key)
+  - `ctrl+x ctrl+s` → `chat:stash`, replacing the default plain `ctrl+s` (which risks being read as terminal XOFF flow control, freezing output until `ctrl+q`)
+  - `alt+x` → `chat:killAgents`, `alt+g` → `task:background`, `alt+a` → `abovePrompt:toggle`, `alt+d` → `app:cycleDiffBase` (Diff­Panel) — single-tap alternatives to each action's `ctrl+x`-prefixed chord
+  - All additive (your own bindings and the originals still work) and merged by value rather than by marker comment (JSON has no comment syntax): `install.sh` remembers exactly which entries it added in `~/.claude/claude-native/.keybindings-managed.json`, so re-running it after a template change replaces just those entries — anything else in your `keybindings.json` is left alone. `uninstall.sh` reverses it the same way. Don't hand-edit a value *inside* one of these managed entries (add your own separate binding instead) — a later `install.sh` run won't recognize the edit as ours and may re-add the original alongside it.
 - **Session hooks** (opt-in — `install.sh --with-notifications`, `scripts/session-hooks.sh`): wires three Claude Code hooks to Termux:API so the phone tells you things without you watching the terminal.
   - `UserPromptSubmit` → `termux-wake-lock`, `Stop` → `termux-wake-unlock`: holds a wake lock only while Claude is actually working on a turn, so Android doesn't throttle/kill a long-running task in the background when the screen locks. Needs only bare Termux — no Termux:API app required.
   - `Notification` (matcher: `permission_prompt|idle_prompt|agent_needs_input|agent_completed`) → a `termux-notification`, so a permission prompt or an idle wait doesn't go unnoticed off-screen.

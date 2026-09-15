@@ -21,8 +21,8 @@ esac
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="install.sh"
-TOTAL=10
-[ "$WITH_NOTIFICATIONS" = "1" ] && TOTAL=11
+TOTAL=11
+[ "$WITH_NOTIFICATIONS" = "1" ] && TOTAL=12
 # shellcheck source=scripts/lib.sh
 source "$REPO_DIR/scripts/lib.sh"
 
@@ -150,6 +150,20 @@ install_skill() {
   install -m 600 "$REPO_DIR/skills/termux-doctor/SKILL.md" "$dir/SKILL.md"
 }
 
+# Merges keybindings.json.template into ~/.claude/keybindings.json: a set
+# of Termux-friendly rebinds for actions whose only default binding needs
+# Shift (unreachable — Termux's extra-keys row has no Shift key) or a
+# ctrl+x-prefixed two-tap chord, replaced/supplemented with single alt+key
+# taps (alt reads as a plain, always-tappable extra key). See README.md
+# ("Extra features" -> "Termux-friendly keybindings") for the full list
+# and rationale. Not opt-in, unlike the other features below — this one's
+# on by default.
+install_keybindings() {
+  keybindings_upsert "$REPO_DIR/keybindings.json.template" \
+    "$HOME/.claude/keybindings.json" \
+    "$DEST/.keybindings-managed.json"
+}
+
 echo "${BOLD}claude-code-termux-native${RESET} — installing Claude Code natively on Termux"
 echo
 
@@ -175,6 +189,7 @@ step "disabling the in-process autoupdater"                  disable_autoupdater
 step "wiring doctor.sh into a SessionStart hook"              install_doctor_hook
 step "installing environment notes into ~/.claude/CLAUDE.md" install_claude_md
 step "installing the termux-doctor skill"                    install_skill
+step "merging Termux-friendly keybindings"                    install_keybindings
 if [ "$WITH_NOTIFICATIONS" = "1" ]; then
   step "wiring optional Termux:API session hooks"               install_session_hooks
 fi
@@ -193,6 +208,10 @@ echo
 echo "  Environment notes were also added to ~/.claude/CLAUDE.md, and the"
 echo "  termux-doctor skill was installed, so claude recognizes this setup"
 echo "  (and its quirks) and knows how to self-diagnose from now on."
+echo
+echo "  A set of Termux-friendly keybindings was merged into"
+echo "  ~/.claude/keybindings.json (alt+key alternatives for the actions"
+echo "  whose only default needs Shift or a ctrl+x chord — see README)."
 
 if [ "$WITH_NOTIFICATIONS" = "1" ]; then
   echo

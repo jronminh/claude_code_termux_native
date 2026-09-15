@@ -22,7 +22,7 @@ esac
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="uninstall.sh"
-TOTAL=8
+TOTAL=9
 # shellcheck source=scripts/lib.sh
 source "$REPO_DIR/scripts/lib.sh"
 
@@ -101,9 +101,18 @@ remove_skill() {
   rm -rf "$HOME/.claude/skills/termux-doctor"
 }
 
+# Must run BEFORE remove_claude_native: it reads $DEST/.keybindings-managed.json
+# (written by install.sh's install_keybindings) to know exactly which
+# bindings to strip back out of ~/.claude/keybindings.json, and
+# remove_claude_native deletes that same file.
+remove_keybindings() {
+  keybindings_remove "$HOME/.claude/keybindings.json" "$DEST/.keybindings-managed.json"
+}
+
 echo "${BOLD}claude-code-termux-native${RESET} — uninstalling"
 echo
 
+step "removing Termux-friendly keybindings from ~/.claude/keybindings.json" remove_keybindings
 if [ "$FULL" = "1" ]; then
   step "removing ~/.claude/claude-native (binary + everything in it)" remove_claude_native
 else
@@ -121,7 +130,8 @@ rm -f "$LOG"
 trap - ERR
 echo
 echo "${GREEN}${BOLD}uninstall complete${RESET}"
-echo "  claude-code-termux-native has been removed."
+echo "  claude-code-termux-native has been removed, including the"
+echo "  Termux-friendly keybindings merged into ~/.claude/keybindings.json."
 echo
 if [ "$FULL" = "1" ]; then
   echo "  The claude-native binary cache was also removed ($(shortp "$DEST"))."

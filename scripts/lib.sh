@@ -96,6 +96,54 @@ claude_md_remove() {
   ' "$target" > "$target.tmp" && mv "$target.tmp" "$target"
 }
 
+# keybindings_upsert TEMPLATE_FILE TARGET_FILE MANAGED_FILE — merges
+# TEMPLATE_FILE's .bindings array into TARGET_FILE's (~/.claude/keybindings.json),
+# without disturbing any binding blocks the user added themselves.
+# keybindings.json has no comment syntax to hang a begin/end marker off of
+# (unlike CLAUDE.md), so this upserts by VALUE instead: MANAGED_FILE
+# remembers exactly which array entries we installed last time; on a
+# re-run, those exact entries (deep-equality, via jq's array `-` operator)
+# are removed from the live file before this run's template entries are
+# appended, so updating the template later replaces our old entries
+# instead of piling up duplicates. Creates TARGET_FILE (and its directory)
+# if missing. Known limitation: hand-editing a binding INSIDE one of our
+# managed context blocks (rather than adding a separate block of your
+# own) means it won't deep-equal what MANAGED_FILE remembers, so a later
+# install.sh re-run may re-add our original alongside your edit instead of
+# replacing it — edit the template and re-run install.sh instead of
+# hand-editing our entries in place.
+keybindings_upsert() {
+  local tmpl="$1" target="$2" managed="$3"
+  mkdir -p "$(dirname "$target")"
+  if [ ! -s "$target" ]; then
+    printf '{"$schema": "https://www.schemastore.org/claude-code-keybindings.json", "$docs": "https://code.claude.com/docs/en/keybindings", "bindings": []}' > "$target"
+  fi
+  local prev_bindings='[]'
+  [ -e "$managed" ] && prev_bindings=$(jq -c '.bindings // []' "$managed" 2>/dev/null) || true
+  [ -n "$prev_bindings" ] || prev_bindings='[]'
+  local tmp; tmp=$(mktemp)
+  jq --argjson prev "$prev_bindings" --slurpfile tmpl "$tmpl" '
+    .bindings = ((.bindings // []) - $prev) + $tmpl[0].bindings
+  ' "$target" > "$tmp" && mv "$tmp" "$target"
+  cp -f "$tmpl" "$managed"
+}
+
+# keybindings_remove TARGET_FILE MANAGED_FILE — the inverse of
+# keybindings_upsert: removes exactly the array entries MANAGED_FILE
+# remembers installing, then deletes MANAGED_FILE. No-op if MANAGED_FILE
+# doesn't exist (keybindings_upsert was never run).
+keybindings_remove() {
+  local target="$1" managed="$2"
+  [ -e "$managed" ] || return 0
+  if [ -e "$target" ]; then
+    local prev_bindings; prev_bindings=$(jq -c '.bindings // []' "$managed" 2>/dev/null)
+    [ -n "$prev_bindings" ] || prev_bindings='[]'
+    local tmp; tmp=$(mktemp)
+    jq --argjson prev "$prev_bindings" '.bindings = ((.bindings // []) - $prev)' "$target" > "$tmp" && mv "$tmp" "$target"
+  fi
+  rm -f "$managed"
+}
+
 # Marker embedded as a leading comment in the doctor-hook's SessionStart
 # command, so install.sh/uninstall.sh can find and replace/remove exactly
 # our entry via jq (`test($marker)` on the command string) without
