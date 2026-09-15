@@ -1,6 +1,6 @@
 # claude-code-termux-native
 
-[![License](https://img.shields.io/github/license/jronminh/claude_code_termux_native)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Android%20aarch64-3DDC84)
 ![Shell](https://img.shields.io/badge/shell-bash-4EAA25?logo=gnubash&logoColor=white)
 
