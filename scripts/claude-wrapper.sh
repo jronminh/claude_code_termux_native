@@ -14,6 +14,36 @@ export CLAUDE_CODE_EXECPATH="$HOME/.claude/claude-native/claude"
 # predates it. Harmless either way.
 export BUN_FEATURE_FLAG_DISABLE_EPOLL_PWAIT2=1
 
+BIN="$HOME/.claude/claude-native/claude"
+LD="$PREFIX/glibc/lib/ld-linux-aarch64.so.1"
+
+# Genuinely can't work at all — say so plainly instead of letting exec fail
+# with a cryptic "No such file or directory".
+if [ ! -e "$BIN" ]; then
+  echo "claude binary missing at $BIN — run: ~/.claude/claude-native/update.sh" >&2
+  exit 1
+fi
+if [ ! -e "$LD" ]; then
+  echo "glibc loader missing at $LD (glibc-runner may have changed its path) — run doctor.sh" >&2
+  exit 1
+fi
+
+# trap #9: the binary can pass every check below and still segfault once
+# its event loop actually starts, because none of them exercise the
+# epoll_pwait2 path that crashes on kernel 5.11+ with a pre-fix Bun build.
+# A `strings` scan of a ~300MB binary is too slow to redo on every launch,
+# so this reads a cache autocheck.sh/update.sh computed once — see README
+# "Troubleshooting" #9. Not fatal (the env var above already forces the
+# safe path on builds that check for it) — just a heads-up before the fact
+# instead of a bare segfault with zero context after it.
+EPOLL_CACHE="$HOME/.claude/claude-native/.epoll-fix-cache"
+if [ -e "$EPOLL_CACHE" ] && [ "$(cat "$EPOLL_CACHE" 2>/dev/null)" = "0" ]; then
+  KVER=$(uname -r); KMAJOR=${KVER%%.*}; KREST=${KVER#*.}; KMINOR=${KREST%%.*}
+  if { [ "$KMAJOR" -gt 5 ] 2>/dev/null || { [ "$KMAJOR" -eq 5 ] 2>/dev/null && [ "$KMINOR" -ge 11 ] 2>/dev/null; }; }; then
+    echo "warning: kernel $KVER + this claude build predate the epoll_pwait2 fix — may segfault once running even though it launches (README \"Troubleshooting\" #9). Run doctor.sh, or: termux-update-claude" >&2
+  fi
+fi
+
 # Prefer exec'ing the patched binary directly (no explicit ld-linux
 # invocation): the kernel then records the binary itself, not ld-linux, as
 # the process's exe_file. That matters because Claude reads process.execPath
@@ -24,10 +54,28 @@ export BUN_FEATURE_FLAG_DISABLE_EPOLL_PWAIT2=1
 # inside the Bash tool regardless of restarts. This only works if the glibc
 # runtime is already registered in ld.so.cache (confirmed true here); on an
 # install where it isn't, fall back to the explicit --library-path form.
-if "$HOME/.claude/claude-native/claude" --version >/dev/null 2>&1; then
-  exec "$HOME/.claude/claude-native/claude" "$@"
-else
-  exec "$PREFIX/glibc/lib/ld-linux-aarch64.so.1" \
-    --library-path "$PREFIX/glibc/lib" \
-    "$HOME/.claude/claude-native/claude" "$@"
+if "$BIN" --version >/dev/null 2>&1; then
+  exec "$BIN" "$@"
 fi
+
+# Direct exec failed — most commonly trap #4 (interpreter drifted, usually
+# an unpatched build overwriting ours). Try the same one-shot repatch
+# autocheck.sh does at shell-open before falling back: cheap next to
+# running a whole session in the degraded fallback mode below, and covers
+# a binary that just changed moments ago in this same shell. Same lockfile
+# as autocheck.sh/update.sh so this never races their writes to $BIN; if
+# the lock is busy, skip straight to the fallback rather than block launch.
+(
+  flock -w 2 202 || exit 1
+  patchelf --set-interpreter "$LD" "$BIN" 2>/dev/null && chmod +x "$BIN" 2>/dev/null
+) 202>"$HOME/.claude/claude-native/.claude-native.lock"
+if "$BIN" --version >/dev/null 2>&1; then
+  exec "$BIN" "$@"
+fi
+
+# Still broken after a repatch attempt: fall back so claude at least
+# launches, but say so first. This path is known to break grep/find inside
+# Claude Code's own Bash tool (trap #8) — launching this way is a
+# knowingly-degraded session, not a real fix.
+echo "warning: claude isn't launching cleanly even after a repatch attempt — falling back to an explicit loader invocation. grep/find inside Claude Code's Bash tool may break (README \"Troubleshooting\" #8). Run doctor.sh for the real fix." >&2
+exec "$LD" --library-path "$PREFIX/glibc/lib" "$BIN" "$@"

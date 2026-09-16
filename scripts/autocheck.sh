@@ -41,6 +41,43 @@ if [ ! -e "$BIN" ]; then
   return 0 2>/dev/null || exit 0
 fi
 
+# Hard incompatibility, not a patch-able bug: no binary can execute at all
+# on a noexec $HOME. Loud and every shell until fixed — there's nothing to
+# auto-heal here, unlike everything else in this file.
+MOUNT_LINE=$(awk -v h="$HOME" 'index(h, $2)==1 {print length($2), $0}' /proc/mounts 2>/dev/null | sort -n | tail -1)
+if printf '%s' "$MOUNT_LINE" | grep -q noexec; then
+  echo "FATAL: \$HOME is mounted noexec — claude (or any binary) cannot execute here, patched or not. See README.md \"Troubleshooting\"." >&2
+fi
+
+# Informational, not fatal — Android's binary-translation layers (e.g. some
+# Chromebooks/x86 emulation) can still run an aarch64 binary, so this alone
+# doesn't mean it's broken, just that this repo's aarch64-only assumptions
+# haven't been verified on this ABI.
+REPORTED_ABI=$(getprop ro.product.cpu.abi 2>/dev/null)
+if [ -n "$REPORTED_ABI" ] && [ "$REPORTED_ABI" != "arm64-v8a" ]; then
+  echo "NOTE: Android reports CPU ABI '$REPORTED_ABI' (not arm64-v8a) — if claude misbehaves, this repo's aarch64-only assumptions may be why." >&2
+fi
+
+# trap #9 risk cache (see README "Troubleshooting" #9 and claude-wrapper.sh):
+# update.sh refreshes this on every install/update; this is just a
+# backfill for a binary that predates this cache existing at all. A
+# `strings` scan of a ~300MB binary is too slow for the wrapper's hot path,
+# but once per shell here is fine.
+EPOLL_CACHE="$HOME/.claude/claude-native/.epoll-fix-cache"
+if [ ! -e "$EPOLL_CACHE" ]; then
+  if strings "$BIN" 2>/dev/null | grep -q BUN_FEATURE_FLAG_DISABLE_EPOLL_PWAIT2; then
+    printf '1' > "$EPOLL_CACHE" 2>/dev/null
+  else
+    printf '0' > "$EPOLL_CACHE" 2>/dev/null
+  fi
+fi
+if [ "$(cat "$EPOLL_CACHE" 2>/dev/null)" = "0" ]; then
+  KVER=$(uname -r); KMAJOR=${KVER%%.*}; KREST=${KVER#*.}; KMINOR=${KREST%%.*}
+  if { [ "$KMAJOR" -gt 5 ] 2>/dev/null || { [ "$KMAJOR" -eq 5 ] 2>/dev/null && [ "$KMINOR" -ge 11 ] 2>/dev/null; }; }; then
+    echo "RISK: kernel $KVER is 5.11+ and the installed claude build predates the epoll_pwait2 fix — it may segfault once its event loop starts, even though it launches fine right now. Run doctor.sh, or: termux-update-claude" >&2
+  fi
+fi
+
 # Writes to $BIN/settings.json happen inside this locked block so a second
 # Termux tab opened at the same time can't race with this one (or with
 # update.sh's own install step, which takes the same lock).

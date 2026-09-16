@@ -217,6 +217,15 @@ run "install new manifest" mv "$tmp/manifest.json" "$DEST/manifest.json"
 rm -rf "$tmp"
 tmp=""
 
+# Refresh the trap #9 risk cache the wrapper reads on every launch (see
+# README "Troubleshooting" #9) — the fix status can change with the
+# binary, so recompute right after any real install/update, not lazily.
+if strings "$DEST/claude" 2>/dev/null | grep -q BUN_FEATURE_FLAG_DISABLE_EPOLL_PWAIT2; then
+  printf '1' > "$DEST/.epoll-fix-cache" 2>/dev/null
+else
+  printf '0' > "$DEST/.epoll-fix-cache" 2>/dev/null
+fi
+
 echo "Update successful: $VER."
 echo "Previous binary kept at $DEST_SHOW/claude.prev — roll back with: termux-update-claude --rollback"
 echo "Quit the running claude session and reopen it to use the new version."
