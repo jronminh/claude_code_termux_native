@@ -12,15 +12,26 @@ name: Track Claude Code releases
 # it never becomes a vector if a runner choice changes later.
 #
 # What this DOES verify: the binary downloads, its SHA-256 matches
-# Anthropic's own manifest, and `--version` runs successfully on real
-# arm64 glibc Linux (GitHub's ubuntu-24.04-arm runner) — no patching
-# needed for that, since the shipped binary is already linux-arm64 glibc.
+# Anthropic's own manifest, `--version` runs successfully on real arm64
+# glibc Linux (GitHub's ubuntu-24.04-arm runner), AND it runs against
+# Termux's own currently-shipped glibc build specifically (downloaded
+# fresh from Termux's own apt repo each run, extracted, never installed
+# system-wide or retained past the job) — so a Termux glibc-repo
+# regression that would break this repo's patched install gets caught
+# here too, not just a broken Anthropic build. Nothing about Anthropic's
+# binary is ever redistributed by this workflow: it's downloaded fresh
+# from Anthropic's own CDN, tested in the job, and discarded when the job
+# ends — the release this creates carries notes and a version tag only,
+# never a copy of the binary itself (see README "License": the binary
+# remains Anthropic's, this project never ships/hosts a copy of it).
 #
-# What this does NOT verify: anything Bionic/Termux-specific (the
-# patchelf interpreter swap, glibc-runner, the epoll_pwait2 kernel trap
-# documented in README "Troubleshooting" #9, ...). A GitHub-hosted runner
-# can't exercise that path — see notes/planned-features-and-seo.md for
-# why a self-hosted runner (which could) was considered and set aside.
+# What this still does NOT verify: anything kernel-level (the
+# epoll_pwait2 trap documented in README "Troubleshooting" #9, or any
+# other real-Android-kernel-specific quirk). A GitHub-hosted runner always
+# runs a real Linux kernel, never a real Android/Bionic kernel, no matter
+# whose glibc build sits on top of it — see
+# notes/planned-features-and-seo.md for why a self-hosted runner (the only
+# thing that could close this gap) was considered and set aside.
 
 "on":
   schedule:
@@ -89,6 +100,58 @@ jobs:
             echo "VEROUT_EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Verify against Termux's real glibc build
+        if: steps.check.outputs.exists == '0'
+        id: termux_glibc
+        run: |
+          set -euo pipefail
+          GLIBC_REPO=https://packages-cf.termux.dev/apt/termux-glibc
+
+          # Written to a file rather than piped into awk: an early
+          # `exit` inside a pipeline reader closes the pipe while curl is
+          # still writing, and under `pipefail` that SIGPIPE turns into a
+          # hard failure of this whole step — writing to a file first
+          # avoids that entirely.
+          curl -fsSL -o packages.txt "$GLIBC_REPO/dists/glibc/stable/binary-aarch64/Packages"
+          PKG_BLOCK=$(awk '/^Package: glibc$/{p=1} p{print} p && /^$/{p=0}' packages.txt)
+          FILENAME=$(printf '%s\n' "$PKG_BLOCK" | sed -n 's/^Filename: //p')
+          GLIBC_VER=$(printf '%s\n' "$PKG_BLOCK" | sed -n 's/^Version: //p')
+          if [ -z "$FILENAME" ] || [ -z "$GLIBC_VER" ]; then
+            echo "could not find the glibc package entry in Termux's Packages index — repo layout may have changed" >&2
+            exit 1
+          fi
+
+          # Downloaded fresh every run, extracted to a scratch dir, never
+          # installed system-wide or retained past this job — this is
+          # Termux's own glibc-repo package, not Anthropic's binary, so
+          # there's no redistribution concern here either.
+          curl -fSL -o termux-glibc.deb "$GLIBC_REPO/$FILENAME"
+          mkdir -p termux-root
+          dpkg -x termux-glibc.deb termux-root
+
+          TERMUX_LD=$(find termux-root -name 'ld-linux-aarch64.so.1' -print -quit)
+          if [ -z "$TERMUX_LD" ]; then
+            echo "ld-linux-aarch64.so.1 not found inside Termux's glibc package — package layout may have changed" >&2
+            exit 1
+          fi
+          LIBDIR=$(dirname "$TERMUX_LD")
+
+          # Invoke the loader directly (same pattern scripts/update.sh
+          # uses for its own version check) instead of patchelf +
+          # kernel-loading the binary — this doesn't depend on an
+          # ld.so.cache existing for a freshly dpkg -x'd tree, and tests
+          # the same underlying question: does Termux's actual shipped
+          # glibc load and run this binary correctly.
+          TERMUX_VER_OUT=$("$TERMUX_LD" --library-path "$LIBDIR" ./claude --version)
+          echo "against Termux glibc $GLIBC_VER: $TERMUX_VER_OUT"
+
+          {
+            echo "termux_glibc_version=$GLIBC_VER"
+            echo "termux_reported_version<<VEROUT_EOF"
+            echo "$TERMUX_VER_OUT"
+            echo "VEROUT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create the release
         if: steps.check.outputs.exists == '0'
         env:
@@ -102,4 +165,8 @@ jobs:
 
           Smoke-tested on a GitHub-hosted \`ubuntu-24.04-arm\` runner: the \`linux-arm64\` binary downloaded, its SHA-256 matched Anthropic's manifest, and \`--version\` ran successfully (reported: \`${{ steps.smoke.outputs.reported_version }}\`) — directly on real arm64 glibc Linux, no patching needed for that.
 
-          **This does not verify it works on Termux/Android (Bionic).** A GitHub-hosted runner can't exercise this repo's patched path (glibc-runner, the patchelf interpreter swap, the epoll_pwait2 kernel trap — see README \"Troubleshooting\" #9). Run \`termux-update-claude\` yourself and open an issue if something breaks on-device."
+          Also re-verified against Termux's own currently-shipped \`glibc\` package (v${{ steps.termux_glibc.outputs.termux_glibc_version }}, downloaded fresh from Termux's own apt repo for this check, never retained): \`--version\` via that loader reported \`${{ steps.termux_glibc.outputs.termux_reported_version }}\`. This is a reasonable signal the patched install path will keep working, not a guarantee.
+
+          **This does not verify it works on Termux/Android (Bionic) end to end.** A GitHub-hosted runner always runs a real Linux kernel, never a real Android kernel — it can't catch anything kernel-level, like the epoll_pwait2 trap (see README \"Troubleshooting\" #9). Run \`termux-update-claude\` yourself and open an issue if something still breaks on-device.
+
+          No Anthropic binary is redistributed by this release — only these notes and a version tag."
