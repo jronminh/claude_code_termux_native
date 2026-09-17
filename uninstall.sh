@@ -38,7 +38,8 @@ remove_claude_native() {
     rm -f "$DEST"/autocheck.sh "$DEST"/update.sh "$DEST"/doctor.sh \
           "$DEST"/session-hooks.sh \
           "$DEST"/.claude-native.lock "$DEST"/.repatch-history \
-          "$DEST"/.doctor-last-versions "$DEST"/update-fail-*.log
+          "$DEST"/.doctor-last-versions "$DEST"/.pinned-version \
+          "$DEST"/update-fail-*.log
   fi
 }
 

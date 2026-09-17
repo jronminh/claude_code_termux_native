@@ -186,6 +186,20 @@ else
 fi
 emit version "== version (recognizes a binary change since the last session-start check) ==" "$VERSION_MSG"
 
+PINFILE="$HOME/.claude/claude-native/.pinned-version"
+if [ -s "$PINFILE" ]; then
+  PIN=$(tr -d '[:space:]' < "$PINFILE")
+  CUR=$(printf '%s' "$VER_OUT" | awk '{print $1}')
+  if [ -n "$CUR" ] && [ "$CUR" != "$PIN" ]; then
+    PIN_MSG="MISMATCH: pinned to $PIN but installed version is $CUR — run: termux-update-claude"
+  else
+    PIN_MSG="ok: pinned to $PIN (matches installed version)"
+  fi
+else
+  PIN_MSG="not pinned — tracking stable"
+fi
+emit version_pin "== version pin ==" "$PIN_MSG"
+
 if [ "$JSON" = "1" ]; then
   JOBJ='{}'
   for key in "${!R[@]}"; do

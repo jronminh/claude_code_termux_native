@@ -10,6 +10,7 @@ DEST="$HOME/.claude/claude-native"
 DEST_SHOW="${DEST/#$HOME/\~}"  # display-only, shortened form of $DEST
 LD="$PREFIX/glibc/lib/ld-linux-aarch64.so.1"
 LOCKFILE="$DEST/.claude-native.lock"
+PINFILE="$DEST/.pinned-version"
 DOWNLOAD_OPTS=(--connect-timeout 5 --max-time 60)
 # The claude binary is ~300MB. A flat --max-time is wrong for it on a slow
 # mobile link — it aborts a download that's merely slow, not dead. Use
@@ -49,7 +50,54 @@ if [ "${1:-}" = "--rollback" ]; then
   mv "$DEST/claude.prev" "$DEST/claude"
   [ -e "$DEST/manifest.json.prev" ] && mv "$DEST/manifest.json.prev" "$DEST/manifest.json"
   echo "Rolled back to the previous binary. Quit the running claude session and reopen it."
+  if [ -e "$PINFILE" ]; then
+    echo "note: a pin is set to $(cat "$PINFILE") — the next termux-update-claude run will reinstall it; run --unpin first if that's not what you want."
+  fi
   exit 0
+fi
+
+if [ "${1:-}" = "--unpin" ]; then
+  if [ ! -e "$PINFILE" ]; then
+    echo "Not currently pinned."
+    exit 0
+  fi
+  exec 203>"$LOCKFILE"
+  if ! flock -w 10 203; then
+    echo "Another update/repair is in progress — try again in a moment." >&2
+    exit 1
+  fi
+  rm -f "$PINFILE"
+  echo "Unpinned — future updates resume tracking stable."
+  exit 0
+fi
+
+if [ "${1:-}" = "--pin" ] && [ -z "${2:-}" ]; then
+  exec 203>"$LOCKFILE"
+  if ! flock -w 10 203; then
+    echo "Another update/repair is in progress — try again in a moment." >&2
+    exit 1
+  fi
+  PIN_CURRENT=""
+  if [ -x "$DEST/claude" ] && [ -e "$LD" ]; then
+    PIN_CURRENT=$("$LD" --library-path "$PREFIX/glibc/lib" "$DEST/claude" --version 2>/dev/null | awk '{print $1}')
+  fi
+  if [ -z "$PIN_CURRENT" ]; then
+    echo "Nothing installed to pin to yet — pass an explicit version: termux-update-claude --pin <version>" >&2
+    exit 1
+  fi
+  printf '%s' "$PIN_CURRENT" > "$PINFILE"
+  echo "Pinned to $PIN_CURRENT (already installed, no download)."
+  exit 0
+fi
+
+# --pin VERSION: don't exit — fall through into the normal update pipeline
+# below with VER forced to the requested version, so pinning to a new
+# version reuses the exact same download/verify/patch/install path a
+# regular update takes (only where VER comes from differs).
+PIN_REQUESTED=0
+if [ "${1:-}" = "--pin" ] && [ -n "${2:-}" ]; then
+  PIN_REQUESTED=1
+  VER=$(printf '%s' "$2" | tr -d '[:space:]')
 fi
 
 CHECK_ONLY=0
@@ -148,19 +196,27 @@ $(cat "$errlog")"
 
 [ -e "$LD" ] || report_fail "check loader" "Loader not found at $LD — glibc-runner may have changed its path. Run doctor.sh to re-probe."
 
-if [ "$CHECK_ONLY" = "1" ]; then
-  VER_OUT=$(curl -fsSL "${CHECK_OPTS[@]}" "$BASE/stable" 2>&1); VER_RC=$?
+PINNED=0
+if [ "$PIN_REQUESTED" = "1" ]; then
+  PINNED=1  # VER already set above from the --pin VERSION argument
+elif [ -s "$PINFILE" ]; then
+  PINNED=1
+  VER=$(tr -d '[:space:]' < "$PINFILE")
 else
-  VER_OUT=$(curl -fsSL "${DOWNLOAD_OPTS[@]}" "$BASE/stable" 2>&1); VER_RC=$?
-fi
-if [ $VER_RC -ne 0 ]; then
-  report_fail "fetch latest version from $BASE/stable" "Command: curl -fsSL $BASE/stable
+  if [ "$CHECK_ONLY" = "1" ]; then
+    VER_OUT=$(curl -fsSL "${CHECK_OPTS[@]}" "$BASE/stable" 2>&1); VER_RC=$?
+  else
+    VER_OUT=$(curl -fsSL "${DOWNLOAD_OPTS[@]}" "$BASE/stable" 2>&1); VER_RC=$?
+  fi
+  if [ $VER_RC -ne 0 ]; then
+    report_fail "fetch latest version from $BASE/stable" "Command: curl -fsSL $BASE/stable
 Exit code: $VER_RC
 Output:
 $VER_OUT"
+  fi
+  VER=$(printf '%s' "$VER_OUT" | tr -d '[:space:]')
+  [ -n "$VER" ] || report_fail "fetch latest version" "Server returned an empty string for $BASE/stable"
 fi
-VER=$(printf '%s' "$VER_OUT" | tr -d '[:space:]')
-[ -n "$VER" ] || report_fail "fetch latest version" "Server returned an empty string for $BASE/stable"
 
 CURRENT=""
 if [ -x "$DEST/claude" ] && [ -e "$LD" ]; then
@@ -168,16 +224,29 @@ if [ -x "$DEST/claude" ] && [ -e "$LD" ]; then
 fi
 
 if [ "$CURRENT" = "$VER" ]; then
-  [ "$CHECK_ONLY" = "1" ] || echo "Already on the latest version ($VER)."
+  if [ "$PINNED" = "1" ]; then
+    printf '%s' "$VER" > "$PINFILE"
+    [ "$CHECK_ONLY" = "1" ] || echo "Already on $VER — pinned."
+  else
+    [ "$CHECK_ONLY" = "1" ] || echo "Already on the latest version ($VER)."
+  fi
   exit 0
 fi
 
 if [ "$CHECK_ONLY" = "1" ]; then
-  echo "New version available: $VER. Run: termux-update-claude"
+  if [ "$PINNED" = "1" ]; then
+    echo "Installed version ($CURRENT) differs from pinned version ($VER). Run: termux-update-claude"
+  else
+    echo "New version available: $VER. Run: termux-update-claude"
+  fi
   exit 0
 fi
 
-echo "New version available: $VER. Downloading..."
+if [ "$PINNED" = "1" ]; then
+  echo "Installed version ($CURRENT) differs from pinned version ($VER). Installing..."
+else
+  echo "New version available: $VER. Downloading..."
+fi
 
 # Locked from here on: this writes $DEST/claude, the same file autocheck.sh's
 # self-heal may patchelf in place. Same lock file as autocheck.sh so the two
@@ -224,6 +293,11 @@ if strings "$DEST/claude" 2>/dev/null | grep -q BUN_FEATURE_FLAG_DISABLE_EPOLL_P
   printf '1' > "$DEST/.epoll-fix-cache" 2>/dev/null
 else
   printf '0' > "$DEST/.epoll-fix-cache" 2>/dev/null
+fi
+
+if [ "$PIN_REQUESTED" = "1" ]; then
+  printf '%s' "$VER" > "$PINFILE"
+  echo "Pinned to $VER."
 fi
 
 echo "Update successful: $VER."

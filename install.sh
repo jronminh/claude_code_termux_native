@@ -30,12 +30,6 @@ DEST="$HOME/.claude/claude-native"
 BIN_DIR="$PREFIX/bin"
 LD="$PREFIX/glibc/lib/ld-linux-aarch64.so.1"
 
-check_platform() {
-  [ "$(uname -m)" = "aarch64" ] || fail "this installer only supports aarch64 (found $(uname -m))"
-  [ -n "${PREFIX:-}" ] && [ -n "${HOME:-}" ] || fail "doesn't look like Termux (PREFIX or HOME unset)"
-  command -v pkg >/dev/null 2>&1 || fail "'pkg' not found — this installer is Termux-only"
-}
-
 install_packages() {
   # --force-confdef/--force-confold: this runs unattended (no TTY to answer
   # dpkg's "keep your modified conffile?" prompt), so auto-keep the existing

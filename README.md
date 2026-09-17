@@ -4,7 +4,7 @@
 ![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Android%20aarch64-3DDC84)
 ![Shell](https://img.shields.io/badge/shell-bash-4EAA25?logo=gnubash&logoColor=white)
 
-Patches Claude Code's official `linux-arm64` binary to link against **Termux's own glibc** instead of Android's Bionic libc — so it runs natively on Android. No `proot-distro`, no Ubuntu chroot, no emulation layer. Updates safely too: a verified update/rollback path plus self-healing checks keep the patch from ever getting silently overwritten by a broken build.
+**Run Claude Code natively on Termux/Android** — no `proot-distro`, no Ubuntu chroot, no emulation layer. Patches Claude Code's official `linux-arm64` binary to link against **Termux's own glibc** instead of Android's Bionic libc, and wires Claude Code itself into the environment — injecting notes into `~/.claude/CLAUDE.md` and installing a `termux-doctor` skill — so Claude knows it's on a patched Bionic/aarch64 setup and can self-diagnose failures (segfaults, bad ELF errors, patchelf weirdness, ...) instead of guessing blind. Updates safely too: a verified update/rollback path plus self-healing checks keep the patch from ever getting silently overwritten by a broken build.
 
 > Unofficial, community project — not affiliated with or endorsed by Anthropic. Ships no binary: `install.sh` downloads it at install time from Anthropic's own `downloads.claude.ai`, the same endpoint the official installer uses, and verifies its SHA-256 against Anthropic's manifest before ever running it.
 
@@ -59,6 +59,20 @@ claude
 11. Merges [`keybindings.json.template`](keybindings.json.template) into your `~/.claude/keybindings.json` — see [Extra features](#extra-features-beyond-a-bare-install) for what it rebinds and why.
 12. With `--with-notifications`: wires `session-hooks.sh` into the `UserPromptSubmit`/`Stop`/`Notification` hooks (per-turn wake-lock + Termux:API notifications) — see [Extra features](#extra-features-beyond-a-bare-install). Skipped by default.
 
+## Migrating from a plain npm install
+
+Before v2.1.113, Claude Code ran on Termux via a plain `npm install -g @anthropic-ai/claude-code` — a pure JS/Node path that needed no ELF patching at all. Anthropic dropped that fallback at v2.1.113+, requiring the native `linux-arm64` binary this repo exists to patch (see "Why this exists" above, and [anthropics/claude-code#50270](https://github.com/anthropics/claude-code/issues/50270)). If you're still on that old npm install, `migrate.sh` gets you onto the patched-native path:
+
+```sh
+bash migrate.sh                       # detect + back up the old install, then install.sh
+bash migrate.sh --remove-npm-install  # also npm-uninstall the old package once backed up
+bash migrate.sh --yes                 # skip the confirmation prompt
+```
+
+It detects the old install (a Node-shebang script, corroborated via `npm ls -g` when possible), renames it aside (`claude.pre-migrate-native.<timestamp>` — never deleted, trivially reversible), then hands off to `install.sh` for the actual native setup. `~/.claude/` (settings.json, session transcripts, CLAUDE.md, auth) is never touched by `migrate.sh` itself — only by `install.sh`'s own idempotent merges, exactly as they already behave against a populated directory. If it finds something it can't confidently classify (a different fork's patched binary, an unrecognized file), it prints what it found and does nothing — never guesses.
+
+If you're not on the old npm path, running `migrate.sh` is a safe no-op — it recognizes this repo's own install and tells you there's nothing to do; run `install.sh` directly instead.
+
 ## Layout after install
 
 ```
@@ -73,6 +87,7 @@ claude
   .repatch-history       # timestamps of automatic re-patches (see below)
   .last-claude-version   # last two `claude --version` strings seen by doctor.sh (previous, current) — powers update recognition at session start
   .epoll-fix-cache       # "1"/"0" — does the installed build carry the trap #9 fix? refreshed by update.sh, read by the wrapper on every launch
+  .pinned-version        # present only if you've run --pin — the version termux-update-claude tracks instead of stable
 
 $PREFIX/bin/claude               # wrapper — what actually runs when you type `claude`
 $PREFIX/bin/termux-update-claude # manual update/rollback command
@@ -92,6 +107,7 @@ To change how any of this works, edit `scripts/` **in this repo** and re-run `in
 - **Locking**: self-heal and `update.sh`'s install step share one `flock`, so two Termux tabs open at once can't race and corrupt the binary.
 - **Repatch-frequency escalation**: 2+ re-patches in 24h escalates from a quiet fix notice to an explicit warning that `DISABLE_AUTOUPDATER` isn't actually holding.
 - **Update / rollback**: `termux-update-claude` downloads → verifies SHA-256 → patches → installs, swapping in the new binary only once every check passes, with automatic retry/resume on a dropped connection. `--rollback` restores the previous binary (kept as `claude.prev`; a rejected build is kept as `claude.rejected`, not deleted).
+- **Version pinning**: `termux-update-claude --pin` locks onto a specific version, so neither a manual run nor `autocheck.sh`'s silent per-shell check ever advances past it — `--pin` alone pins whatever's currently installed (no download); `--pin <version>` downloads/verifies/installs that exact version first, same pipeline as a normal update, then pins it. `--unpin` resumes tracking `stable`. A drift between the pin and what's actually installed (e.g. after a manual `--rollback`) is surfaced, never silently auto-corrected — `autocheck.sh`'s self-heal is local-only (chmod/re-patch) and deliberately never downloads on its own, so `doctor.sh` and the check-only nudge report the mismatch and leave the ~300MB fetch to an explicit `termux-update-claude` run. Whether Anthropic's CDN keeps old versions' manifests reachable indefinitely is unverified — an old pin can eventually 404; that failure is reported the same way any other update failure is, with a full log saved to `$DEST/update-fail-<timestamp>.log`.
 - **`settings.json` backup**: `install.sh`, `autocheck.sh`, and `uninstall.sh` each back up `~/.claude/settings.json` to `settings.json.bak` before touching the `DISABLE_AUTOUPDATER` key or the `doctor.sh` hook. Restore with `cp ~/.claude/settings.json.bak ~/.claude/settings.json`; `doctor.sh` reports backup status.
 - **Termux:API notifications** (optional — `pkg install termux-api` + the Termux:API app, not installed by `install.sh`): if `termux-notification` is available, a real update failure or a repatch-frequency escalation each push a notification, so they're not missed in a backgrounded tab. `doctor.sh` reports whether this is wired up.
 - **`doctor.sh`**: one-shot diagnostic dump — arch/ABI cross-check (catches binary-translation layers), kernel `epoll_pwait2` risk (checked against whether the *installed binary* carries the upstream fix, not just the kernel version), paths, binary/interpreter state, leaked `LD_*` env, autoupdater-disabled check, `settings.json` backup status, Termux:API wiring, optional session-hooks wiring, Termux build freshness (flags a likely stale/Play-Store install), glibc/patchelf version drift, `$HOME` `noexec` check, free disk space, and `--version` (with update recognition). Run this first, before guessing.
@@ -147,6 +163,9 @@ Claude Code's own autoupdater is disabled (`DISABLE_AUTOUPDATER=1`, see "Why thi
 ```sh
 termux-update-claude              # check for + apply an update
 termux-update-claude --rollback   # revert to the previously installed binary
+termux-update-claude --pin        # lock onto whatever's currently installed
+termux-update-claude --pin 2.1.260  # download/install/pin that exact version
+termux-update-claude --unpin      # resume tracking stable
 ```
 
 A currently-running `claude` session can't hot-swap its own binary — quit and reopen after updating. The next session then recognizes the change on its own — see "Update recognition" above.

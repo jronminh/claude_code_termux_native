@@ -24,6 +24,14 @@ trap 'on_err $LINENO' ERR
 
 fail() { echo "${RED}${BOLD}$*${RESET}" >&2; exit 1; }
 
+# check_platform — shared aarch64/Termux precondition, used by install.sh
+# and migrate.sh (both need the exact same check before doing anything else).
+check_platform() {
+  [ "$(uname -m)" = "aarch64" ] || fail "this installer only supports aarch64 (found $(uname -m))"
+  [ -n "${PREFIX:-}" ] && [ -n "${HOME:-}" ] || fail "doesn't look like Termux (PREFIX or HOME unset)"
+  command -v pkg >/dev/null 2>&1 || fail "'pkg' not found — this installer is Termux-only"
+}
+
 # kernel_is_risky — true (exit 0) if the running kernel is >= 5.11. NOT a
 # seccomp block: strace on a real crash shows no epoll_pwait2 syscall entry
 # before the SIGSEGV. Bun's kernel-version gate decides at that threshold
