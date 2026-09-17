@@ -22,7 +22,7 @@ esac
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="uninstall.sh"
-TOTAL=9
+TOTAL=10
 # shellcheck source=scripts/lib.sh
 source "$REPO_DIR/scripts/lib.sh"
 
@@ -36,7 +36,7 @@ remove_claude_native() {
     # Keep claude/claude.prev/manifest.json* cached — they're the expensive
     # (~300MB) part to reproduce. Just clear out what made them "live".
     rm -f "$DEST"/autocheck.sh "$DEST"/update.sh "$DEST"/doctor.sh \
-          "$DEST"/session-hooks.sh \
+          "$DEST"/session-hooks.sh "$DEST"/claude-job-runner.sh \
           "$DEST"/.claude-native.lock "$DEST"/.repatch-history \
           "$DEST"/.doctor-last-versions "$DEST"/.pinned-version \
           "$DEST"/update-fail-*.log
@@ -44,7 +44,31 @@ remove_claude_native() {
 }
 
 remove_wrapper() {
-  rm -f "$BIN_DIR/claude" "$BIN_DIR/termux-update-claude"
+  rm -f "$BIN_DIR/claude" "$BIN_DIR/termux-update-claude" "$BIN_DIR/termux-claude-job"
+}
+
+# Must run BEFORE remove_claude_native (--full) / remove_wrapper: cancels
+# each job's real Android JobScheduler registration first, so nothing is
+# left pointing at a stub script (~/.claude/claude-native/jobs/<name>.sh)
+# that's about to disappear. Always removes the jobs/ dir (including
+# --full-independent of the binary cache) since job definitions are live
+# schedules, not an expensive-to-reproduce download like the binary is.
+remove_scheduled_jobs() {
+  if command -v termux-job-scheduler >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && [ -d "$DEST/jobs" ]; then
+    local f id
+    for f in "$DEST"/jobs/*.json; do
+      [ -e "$f" ] || continue
+      id=$(jq -r '.id' "$f" 2>/dev/null) || continue
+      [ -n "$id" ] && termux-job-scheduler --cancel --job-id "$id" 2>/dev/null || true
+    done
+    # NOT --cancel-all: that would also cancel any unrelated
+    # termux-job-scheduler job another tool on this device has scheduled —
+    # termux-job-scheduler has no per-app job namespacing, so cancelling by
+    # the specific job-id each of ours was registered under (same ids
+    # `termux-claude-job` computes from the job name) is the only safe way
+    # to remove exactly what we added.
+  fi
+  rm -rf "$DEST/jobs"
 }
 
 remove_bashrc_hook() {
@@ -114,6 +138,7 @@ echo "${BOLD}claude-code-termux-native${RESET} — uninstalling"
 echo
 
 step "removing Termux-friendly keybindings from ~/.claude/keybindings.json" remove_keybindings
+step "cancelling scheduled claude jobs (termux-job-scheduler)"       remove_scheduled_jobs
 if [ "$FULL" = "1" ]; then
   step "removing ~/.claude/claude-native (binary + everything in it)" remove_claude_native
 else

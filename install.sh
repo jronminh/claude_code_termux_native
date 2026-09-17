@@ -43,15 +43,17 @@ install_packages() {
 
 stage_scripts() {
   mkdir -p "$DEST"
-  install -m 700 "$REPO_DIR/scripts/autocheck.sh"     "$DEST/autocheck.sh"
-  install -m 700 "$REPO_DIR/scripts/update.sh"        "$DEST/update.sh"
-  install -m 700 "$REPO_DIR/scripts/doctor.sh"        "$DEST/doctor.sh"
-  install -m 700 "$REPO_DIR/scripts/session-hooks.sh" "$DEST/session-hooks.sh"
+  install -m 700 "$REPO_DIR/scripts/autocheck.sh"          "$DEST/autocheck.sh"
+  install -m 700 "$REPO_DIR/scripts/update.sh"              "$DEST/update.sh"
+  install -m 700 "$REPO_DIR/scripts/doctor.sh"              "$DEST/doctor.sh"
+  install -m 700 "$REPO_DIR/scripts/session-hooks.sh"       "$DEST/session-hooks.sh"
+  install -m 700 "$REPO_DIR/scripts/claude-job-runner.sh"   "$DEST/claude-job-runner.sh"
 }
 
 install_wrapper() {
   install -m 700 "$REPO_DIR/scripts/claude-wrapper.sh" "$BIN_DIR/claude"
   install -m 700 "$REPO_DIR/scripts/termux-update-claude.sh" "$BIN_DIR/termux-update-claude"
+  install -m 700 "$REPO_DIR/scripts/claude-job.sh" "$BIN_DIR/termux-claude-job"
 }
 
 wire_bashrc() {
@@ -197,6 +199,7 @@ echo "  ${DIM}2.${RESET} run: ${BOLD}claude${RESET}"
 echo
 printf '  %-18s: %s\n' "verify anytime"    "${DIM}bash $(shortp "$DEST")/doctor.sh${RESET}"
 printf '  %-18s: %s\n' "check for updates" "${DIM}termux-update-claude${RESET}"
+printf '  %-18s: %s\n' "schedule a job"    "${DIM}termux-claude-job add <name> --prompt \"...\" --period-ms 900000${RESET}"
 printf '  %-18s: %s\n' "uninstall"         "${DIM}bash $(shortp "$REPO_DIR")/uninstall.sh${RESET}"
 echo
 echo "  Environment notes were also added to ~/.claude/CLAUDE.md, and the"

@@ -46,6 +46,35 @@ state_file() {
 # not just long ones, so this keeps short back-and-forth chat quiet.
 THRESHOLD=60
 
+# Battery percentage at/below which battery_context() speaks up (only when
+# also not charging — see below).
+BATTERY_LOW_PERCENT=20
+
+# battery_context — best-effort: on a mobile device running low on battery
+# and not charging, print one line of plain text. For UserPromptSubmit,
+# Claude Code feeds a command hook's stdout back to Claude as context (see
+# notes/termux-features-research.md) — so this is how Claude becomes aware
+# of real battery state without the human having to say so. Silent
+# (no output) whenever battery is fine, unknown, or termux-battery-status
+# isn't available/responding — `timeout` caps the wait so a missing/
+# ungranted Termux:API app can't delay every single prompt.
+battery_context() {
+  command -v termux-battery-status >/dev/null 2>&1 || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  local info percentage status
+  info=$(timeout 3 termux-battery-status 2>/dev/null) || return 0
+  percentage=$(printf '%s' "$info" | jq -r '.percentage // empty' 2>/dev/null)
+  status=$(printf '%s' "$info" | jq -r '.status // empty' 2>/dev/null)
+  [ -n "$percentage" ] || return 0
+  case "$status" in
+    CHARGING|FULL) return 0 ;;
+  esac
+  if [ "$percentage" -le "$BATTERY_LOW_PERCENT" ] 2>/dev/null; then
+    echo "Device battery is low (${percentage}%, not charging) — this is a mobile device; prefer batching work and avoid kicking off long unattended background tasks until it's charging."
+  fi
+  return 0
+}
+
 cmd_submit() {
   command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock 2>/dev/null
   # Sweep state files from crashed/never-stopped sessions so STATE_DIR
@@ -55,6 +84,7 @@ cmd_submit() {
     flock -w 3 200 2>/dev/null
     date +%s > "$(state_file)" 2>/dev/null
   ) 200>"$WAKELOCK_LOCKFILE"
+  battery_context
   return 0
 }
 

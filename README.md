@@ -82,7 +82,9 @@ If you're not on the old npm path, running `migrate.sh` is a safe no-op — it r
   autocheck.sh          # self-heal, runs on every new Termux shell via .bashrc
   update.sh             # download/verify/patch/install + rollback
   doctor.sh             # diagnostic dump — run this first when something's broken
-  session-hooks.sh      # optional Termux:API hooks (wake-lock + notifications), only wired with --with-notifications
+  session-hooks.sh      # optional Termux:API hooks (wake-lock + battery-aware notifications), only wired with --with-notifications
+  claude-job-runner.sh   # invoked by Android's JobScheduler for a scheduled `termux-claude-job`
+  jobs/                  # one <name>.json (definition) + <name>.sh (stub JobScheduler target) + <name>.log per scheduled job
   .claude-native.lock    # flock used by autocheck.sh and update.sh so they never race
   .repatch-history       # timestamps of automatic re-patches (see below)
   .last-claude-version   # last two `claude --version` strings seen by doctor.sh (previous, current) — powers update recognition at session start
@@ -91,6 +93,7 @@ If you're not on the old npm path, running `migrate.sh` is a safe no-op — it r
 
 $PREFIX/bin/claude               # wrapper — what actually runs when you type `claude`
 $PREFIX/bin/termux-update-claude # manual update/rollback command
+$PREFIX/bin/termux-claude-job    # schedule/list/remove/run headless `claude -p` jobs via Android's JobScheduler
 
 ~/.claude/CLAUDE.md              # our section lives inside begin/end markers; rest of the file is yours
 ~/.claude/skills/termux-doctor/SKILL.md   # full trap list + self-repair playbook, invoked on demand
@@ -123,10 +126,17 @@ To change how any of this works, edit `scripts/` **in this repo** and re-run `in
   - `alt+x` → `chat:killAgents`, `alt+g` → `task:background`, `alt+a` → `abovePrompt:toggle`, `alt+d` → `app:cycleDiffBase` (Diff­Panel) — single-tap alternatives to each action's `ctrl+x`-prefixed chord
   - All additive (your own bindings and the originals still work) and merged by value rather than by marker comment (JSON has no comment syntax): `install.sh` remembers exactly which entries it added in `~/.claude/claude-native/.keybindings-managed.json`, so re-running it after a template change replaces just those entries — anything else in your `keybindings.json` is left alone. `uninstall.sh` reverses it the same way. Don't hand-edit a value *inside* one of these managed entries (add your own separate binding instead) — a later `install.sh` run won't recognize the edit as ours and may re-add the original alongside it.
 - **Session hooks** (opt-in — `install.sh --with-notifications`, `scripts/session-hooks.sh`): wires three Claude Code hooks to Termux:API so the phone tells you things without you watching the terminal.
-  - `UserPromptSubmit` → `termux-wake-lock`, `Stop` → `termux-wake-unlock`: holds a wake lock only while Claude is actually working on a turn, so Android doesn't throttle/kill a long-running task in the background when the screen locks. Needs only bare Termux — no Termux:API app required.
+  - `UserPromptSubmit` → `termux-wake-lock`, `Stop` → `termux-wake-unlock`: holds a wake lock only while Claude is actually working on a turn, so Android doesn't throttle/kill a long-running task in the background when the screen locks. Needs only bare Termux — no Termux:API app required. Ref-counted across concurrent Termux tabs/sessions via a shared lockfile + per-session marker files, so one tab finishing its turn can't drop the wake lock out from under a different tab still mid-task.
   - `Notification` (matcher: `permission_prompt|idle_prompt|agent_needs_input|agent_completed`) → a `termux-notification`, so a permission prompt or an idle wait doesn't go unnoticed off-screen.
   - `Stop` also pushes a "task finished" notification, but only if the turn ran 60+ seconds — short back-and-forth chat stays quiet.
-  - Both notification paths need `pkg install termux-api` + the Termux:API app; `doctor.sh` reports whether they're wired and whether Termux:API is available. Every action is best-effort and never blocks a turn (hooks always exit 0 — there's no documented safe way to recover a blocked `Stop` hook, so this repo doesn't try).
+  - **Battery-aware context**: `UserPromptSubmit` also checks `termux-battery-status`, and if the device is at or below 20% and not charging, feeds Claude a plain-text heads-up as turn context (not a human-facing notification) — so Claude itself can choose to batch work or hold off on long unattended background tasks instead of draining a low battery, without you having to say so. Silent whenever battery is fine, charging, or the check can't complete (capped at 3s so a missing/ungranted Termux:API app never delays a turn).
+  - All of the above need `pkg install termux-api` + the Termux:API app; `doctor.sh` reports whether they're wired and whether Termux:API is available. Every action is best-effort and never blocks a turn (hooks always exit 0 — there's no documented safe way to recover a blocked `Stop` hook, so this repo doesn't try).
+- **Scheduled jobs** (`termux-claude-job`, always installed — not opt-in, since nothing runs until you explicitly schedule one): runs a headless `claude -p "<prompt>"` on a real Android JobScheduler schedule, not plain cron — a background loop/cron job gets killed by Android the moment the screen locks or Doze kicks in; JobScheduler actually wakes the device for it.
+  - `termux-claude-job add <name> --prompt "..." [--prompt-file PATH] [--period-ms N] [--cwd DIR] [--persisted] [--charging] [--network TYPE]` — schedules it (omit `--period-ms` for one-shot; Android clamps periodic jobs to a 15-minute/900000ms minimum). Re-running `add` with the same name replaces its schedule (same underlying job-id, derived deterministically from the name).
+  - `termux-claude-job list` / `log <name>` / `run <name>` (trigger once now, for testing) / `remove <name>`.
+  - Each run reuses `session-hooks.sh`'s own ref-counted wake-lock (so a background job can't steal the lock out from under — or get its own stolen by — a concurrent interactive session) and its 60s+ "task finished" notification; a non-zero exit additionally pushes a distinct failure notification. Output is logged to `~/.claude/claude-native/jobs/<name>.log`.
+  - `uninstall.sh` cancels each job by its specific job-id (never `--cancel-all`, which would also cancel any unrelated `termux-job-scheduler` job another tool on the device has scheduled — Android's JobScheduler has no per-app job namespacing within Termux).
+- **`termux-open`/`termux-share`**: not wrapped by this repo — they're already plain shell commands once `termux-api` is installed — but documented in the `CLAUDE.md.template` section (see above) so Claude knows to use them directly: `termux-open <path>` opens a file/URL in its default Android app, `termux-share <path>` opens Android's share sheet for it. Lets Claude hand off a finished artifact (a report, an image, a generated file) straight into the rest of your phone's app ecosystem instead of just printing a path.
 
 ## Troubleshooting
 
