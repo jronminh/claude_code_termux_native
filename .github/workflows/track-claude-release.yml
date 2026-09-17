@@ -1,0 +1,105 @@
+name: Track Claude Code releases
+
+# Detects when Anthropic ships a new linux-arm64 Claude Code build and
+# creates a GitHub Release for it on this repo, so watchers/subscribers
+# get pinged instead of having to poll downloads.claude.ai themselves.
+#
+# Deliberately schedule/workflow_dispatch only — NEVER add a
+# pull_request/pull_request_target trigger to this workflow. This repo is
+# public, and GitHub explicitly warns against self-hosted runners on
+# public repos for that reason; this workflow uses a GitHub-hosted runner
+# instead (no such risk), but keep the trigger list narrow regardless so
+# it never becomes a vector if a runner choice changes later.
+#
+# What this DOES verify: the binary downloads, its SHA-256 matches
+# Anthropic's own manifest, and `--version` runs successfully on real
+# arm64 glibc Linux (GitHub's ubuntu-24.04-arm runner) — no patching
+# needed for that, since the shipped binary is already linux-arm64 glibc.
+#
+# What this does NOT verify: anything Bionic/Termux-specific (the
+# patchelf interpreter swap, glibc-runner, the epoll_pwait2 kernel trap
+# documented in README "Troubleshooting" #9, ...). A GitHub-hosted runner
+# can't exercise that path — see notes/planned-features-and-seo.md for
+# why a self-hosted runner (which could) was considered and set aside.
+
+"on":
+  schedule:
+    - cron: "0 * * * *" # hourly
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  track:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve latest stable version
+        id: ver
+        run: |
+          set -euo pipefail
+          VER=$(curl -fsSL https://downloads.claude.ai/claude-code-releases/stable | tr -d '[:space:]')
+          if [ -z "$VER" ]; then
+            echo "empty version from stable endpoint" >&2
+            exit 1
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Check if this version already has a release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "claude-${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download, verify, and smoke-test the binary
+        if: steps.check.outputs.exists == '0'
+        id: smoke
+        run: |
+          set -euo pipefail
+          BASE=https://downloads.claude.ai/claude-code-releases
+          VER="${{ steps.ver.outputs.version }}"
+
+          curl -fSL -o manifest.json "$BASE/$VER/manifest.json"
+          curl -fSL -o claude "$BASE/$VER/linux-arm64/claude"
+
+          EXP=$(jq -r '.platforms["linux-arm64"].checksum' manifest.json)
+          ACTUAL=$(sha256sum claude | awk '{print $1}')
+          if [ -z "$EXP" ] || [ "$EXP" = "null" ] || [ "$EXP" != "$ACTUAL" ]; then
+            echo "checksum mismatch or unreadable: expected '$EXP', got '$ACTUAL'" >&2
+            exit 1
+          fi
+
+          chmod +x claude
+          VER_OUT=$(./claude --version)
+          echo "binary reports: $VER_OUT"
+
+          {
+            echo "commit=$(jq -r '.commit' manifest.json)"
+            echo "build_date=$(jq -r '.buildDate' manifest.json)"
+            echo "reported_version<<VEROUT_EOF"
+            echo "$VER_OUT"
+            echo "VEROUT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create the release
+        if: steps.check.outputs.exists == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VER="${{ steps.ver.outputs.version }}"
+          gh release create "claude-$VER" \
+            --title "claude $VER" \
+            --notes "Detected new Claude Code release **$VER** (commit \`${{ steps.smoke.outputs.commit }}\`, built ${{ steps.smoke.outputs.build_date }}).
+
+          Smoke-tested on a GitHub-hosted \`ubuntu-24.04-arm\` runner: the \`linux-arm64\` binary downloaded, its SHA-256 matched Anthropic's manifest, and \`--version\` ran successfully (reported: \`${{ steps.smoke.outputs.reported_version }}\`) — directly on real arm64 glibc Linux, no patching needed for that.
+
+          **This does not verify it works on Termux/Android (Bionic).** A GitHub-hosted runner can't exercise this repo's patched path (glibc-runner, the patchelf interpreter swap, the epoll_pwait2 kernel trap — see README \"Troubleshooting\" #9). Run \`termux-update-claude\` yourself and open an issue if something breaks on-device."
