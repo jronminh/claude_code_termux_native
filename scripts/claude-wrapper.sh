@@ -63,10 +63,20 @@ fi
 # autocheck.sh does at shell-open before falling back: cheap next to
 # running a whole session in the degraded fallback mode below, and covers
 # a binary that just changed moments ago in this same shell. Same lockfile
-# as autocheck.sh/update.sh so this never races their writes to $BIN; if
-# the lock is busy, skip straight to the fallback rather than block launch.
+# as autocheck.sh/update.sh so this never races their writes to $BIN.
+#
+# Wait longer than autocheck.sh's own "flock -w 5" (scripts/autocheck.sh):
+# autocheck.sh runs at every new shell's startup and can be mid-repatch of
+# this exact binary when a *different*, already-open Termux tab launches
+# claude at the same moment — a real scenario with Termux's tabbed UI, not
+# just this same shell (which can't race itself: autocheck.sh finishes
+# before the prompt it was sourced from even appears). Waiting less than
+# autocheck.sh's own window meant losing that race by design and dropping
+# into the degraded fallback below for the rest of the session, even
+# though the binary was fine microseconds later. If the lock is genuinely
+# stuck past that, skip to the fallback rather than block launch forever.
 (
-  flock -w 2 202 || exit 1
+  flock -w 6 202 || exit 1
   patchelf --set-interpreter "$LD" "$BIN" 2>/dev/null && chmod +x "$BIN" 2>/dev/null
 ) 202>"$HOME/.claude/claude-native/.claude-native.lock"
 if "$BIN" --version >/dev/null 2>&1; then

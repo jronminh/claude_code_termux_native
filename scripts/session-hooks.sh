@@ -15,6 +15,17 @@ set -u
 STATE_DIR="${TMPDIR:-/tmp}/claude-code-termux-native"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
+# termux-wake-lock/-unlock are a single systemwide lock (both just send an
+# intent to the one TermuxService — confirmed by reading
+# $PREFIX/bin/termux-wake-lock/-unlock), not scoped to a PID or session. With
+# two+ concurrent claude sessions (normal with Termux's tabbed UI) an
+# unconditional unlock in cmd_stop would drop the lock out from under a
+# *different* session still mid-task the instant this one's turn ends. This
+# lockfile serializes the ref-count check below (own .since marker removed,
+# then "does any other session's marker still exist") so two sessions
+# stopping at once can't both misread the count.
+WAKELOCK_LOCKFILE="$STATE_DIR/.wakelock.lock"
+
 # Claude Code passes one JSON object on the hook's stdin; read it once.
 INPUT=$(cat 2>/dev/null || true)
 
@@ -40,18 +51,38 @@ cmd_submit() {
   # Sweep state files from crashed/never-stopped sessions so STATE_DIR
   # doesn't grow unbounded.
   find "$STATE_DIR" -name '*.since' -mmin +1440 -delete 2>/dev/null
-  date +%s > "$(state_file)" 2>/dev/null
+  (
+    flock -w 3 200 2>/dev/null
+    date +%s > "$(state_file)" 2>/dev/null
+  ) 200>"$WAKELOCK_LOCKFILE"
   return 0
 }
 
 cmd_stop() {
-  command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock 2>/dev/null
-  command -v termux-notification >/dev/null 2>&1 || return 0
-  local f started now elapsed
+  local f info started others
   f=$(state_file)
-  [ -f "$f" ] || return 0
-  started=$(cat "$f" 2>/dev/null || echo 0)
-  rm -f "$f" 2>/dev/null
+  info=$(
+    flock -w 3 200 2>/dev/null
+    s=0
+    [ -f "$f" ] && s=$(cat "$f" 2>/dev/null || echo 0)
+    rm -f "$f" 2>/dev/null
+    o=0
+    ls "$STATE_DIR"/*.since >/dev/null 2>&1 && o=1
+    printf '%s %s' "$s" "$o"
+  ) 200>"$WAKELOCK_LOCKFILE"
+  started=${info%% *}
+  others=${info##* }
+
+  # Only release the systemwide lock once no other session's marker is left
+  # — i.e. this is the last session still standing. Otherwise leave it held
+  # for whichever session(s) are still running (see WAKELOCK_LOCKFILE note).
+  if [ "$others" = "0" ]; then
+    command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock 2>/dev/null
+  fi
+
+  command -v termux-notification >/dev/null 2>&1 || return 0
+  [ "${started:-0}" -gt 0 ] 2>/dev/null || return 0
+  local now elapsed
   now=$(date +%s)
   elapsed=$(( now - started ))
   [ "$elapsed" -ge "$THRESHOLD" ] || return 0
