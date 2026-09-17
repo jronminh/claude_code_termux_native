@@ -20,13 +20,23 @@ One catch: Claude Code's built-in autoupdater silently swaps in a fresh, **unpat
 
 ## Install
 
+One line:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jronminh/claude_code_termux_native/main/bootstrap.sh | bash
+```
+
+`bootstrap.sh` clones this repo to `~/claude-code-termux-native` (or fast-forwards an existing clone) and runs `install.sh` from it — nothing more. Read it before piping it into `bash` if you'd rather not run a remote script blind; it's under 30 lines.
+
+Or clone it yourself first:
+
 ```sh
 git clone https://github.com/jronminh/claude_code_termux_native.git ~/claude-code-termux-native
 cd ~/claude-code-termux-native
 bash install.sh
 ```
 
-Idempotent — safe to re-run any time, e.g. after a Termux/glibc upgrade. Add `--with-notifications` to also wire the optional [session hooks](#extra-features-beyond-a-bare-install) (per-turn wake-lock + Termux:API notifications) — off by default since, unlike everything else `install.sh` does, it changes day-to-day interactive behavior rather than fixing the execution path itself.
+Both paths are idempotent — safe to re-run any time, e.g. after a Termux/glibc upgrade. Add `--with-notifications` to also wire the optional [session hooks](#extra-features-beyond-a-bare-install) (per-turn wake-lock + Termux:API notifications) — off by default since, unlike everything else `install.sh` does, it changes day-to-day interactive behavior rather than fixing the execution path itself. Via the one-liner: `curl -fsSL .../bootstrap.sh | bash -s -- --with-notifications`.
 
 Then open a **new** Termux session (or `exec bash`) and run:
 
