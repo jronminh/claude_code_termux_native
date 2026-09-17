@@ -1,37 +1,24 @@
 name: Track Claude Code releases
 
-# Detects when Anthropic ships a new linux-arm64 Claude Code build and
-# creates a GitHub Release for it on this repo, so watchers/subscribers
-# get pinged instead of having to poll downloads.claude.ai themselves.
+# Detects when Anthropic ships a new linux-arm64 Claude Code build, or
+# when Termux's own glibc package changes under an already-released
+# build, and publishes/updates a GitHub Release accordingly.
 #
 # Deliberately schedule/workflow_dispatch only — NEVER add a
-# pull_request/pull_request_target trigger to this workflow. This repo is
-# public, and GitHub explicitly warns against self-hosted runners on
-# public repos for that reason; this workflow uses a GitHub-hosted runner
-# instead (no such risk), but keep the trigger list narrow regardless so
-# it never becomes a vector if a runner choice changes later.
+# pull_request/pull_request_target trigger. This repo is public, and
+# GitHub explicitly warns against self-hosted runners on public repos for
+# that reason; this workflow uses a GitHub-hosted runner instead, but
+# keep the trigger list narrow regardless in case that ever changes.
 #
-# What this DOES verify: the binary downloads, its SHA-256 matches
-# Anthropic's own manifest, `--version` runs successfully on real arm64
-# glibc Linux (GitHub's ubuntu-24.04-arm runner), AND it runs against
-# Termux's own currently-shipped glibc build specifically (downloaded
-# fresh from Termux's own apt repo each run, extracted, never installed
-# system-wide or retained past the job) — so a Termux glibc-repo
-# regression that would break this repo's patched install gets caught
-# here too, not just a broken Anthropic build. Nothing about Anthropic's
-# binary is ever redistributed by this workflow: it's downloaded fresh
-# from Anthropic's own CDN, tested in the job, and discarded when the job
-# ends — the release this creates carries notes and a version tag only,
-# never a copy of the binary itself (see README "License": the binary
-# remains Anthropic's, this project never ships/hosts a copy of it).
-#
-# What this still does NOT verify: anything kernel-level (the
-# epoll_pwait2 trap documented in README "Troubleshooting" #9, or any
-# other real-Android-kernel-specific quirk). A GitHub-hosted runner always
-# runs a real Linux kernel, never a real Android/Bionic kernel, no matter
-# whose glibc build sits on top of it — see
-# notes/planned-features-and-seo.md for why a self-hosted runner (the only
-# thing that could close this gap) was considered and set aside.
+# Verifies: SHA-256 against Anthropic's manifest, `--version` on generic
+# arm64 glibc (GitHub's ubuntu-24.04-arm runner), and `--version` against
+# Termux's own currently-shipped glibc (downloaded fresh from Termux's
+# apt repo, extracted, never retained). Does NOT verify anything
+# kernel-level (e.g. the epoll_pwait2 trap, README "Troubleshooting" #9)
+# — no GitHub-hosted runner runs a real Android kernel. No Anthropic
+# binary is ever redistributed — downloaded fresh, tested, discarded.
+# See notes/planned-features-and-seo.md for the self-hosted-runner
+# tradeoff this design avoids.
 
 "on":
   schedule:
@@ -47,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve latest stable version
+      - name: Resolve latest stable claude version
         id: ver
         run: |
           set -euo pipefail
@@ -58,20 +45,50 @@ jobs:
           fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
 
-      - name: Check if this version already has a release
+      - name: Resolve Termux's current glibc package version
+        id: termux_ver
+        run: |
+          set -euo pipefail
+          GLIBC_REPO=https://packages-cf.termux.dev/apt/termux-glibc
+          curl -fsSL -o packages.txt "$GLIBC_REPO/dists/glibc/stable/binary-aarch64/Packages"
+          PKG_BLOCK=$(awk '/^Package: glibc$/{p=1} p{print} p && /^$/{p=0}' packages.txt)
+          FILENAME=$(printf '%s\n' "$PKG_BLOCK" | sed -n 's/^Filename: //p')
+          GLIBC_VER=$(printf '%s\n' "$PKG_BLOCK" | sed -n 's/^Version: //p')
+          if [ -z "$FILENAME" ] || [ -z "$GLIBC_VER" ]; then
+            echo "could not resolve Termux's glibc package version" >&2
+            exit 1
+          fi
+          echo "version=$GLIBC_VER" >> "$GITHUB_OUTPUT"
+          echo "filename=$FILENAME" >> "$GITHUB_OUTPUT"
+
+      # A release's notes carry a trailing `<!-- termux_glibc=X -->`
+      # marker recording which glibc version it was last verified
+      # against. Re-verification is triggered by EITHER a new claude
+      # version OR that marker no longer matching the current glibc
+      # version — so a Termux glibc update alone (independent of claude
+      # ever changing) still gets caught, not just a new claude release.
+      - name: Check existing release + whether re-verification is needed
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if gh release view "claude-${{ steps.ver.outputs.version }}" >/dev/null 2>&1; then
+          TAG="claude-${{ steps.ver.outputs.version }}"
+          if BODY=$(gh release view "$TAG" --json body --jq .body 2>/dev/null); then
             echo "exists=1" >> "$GITHUB_OUTPUT"
+            LAST_GLIBC=$(printf '%s' "$BODY" | sed -n 's/.*<!-- termux_glibc=\([^ ]*\) -->.*/\1/p')
           else
             echo "exists=0" >> "$GITHUB_OUTPUT"
+            LAST_GLIBC=""
+          fi
+          if [ "$LAST_GLIBC" = "${{ steps.termux_ver.outputs.version }}" ]; then
+            echo "run_full=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_full=1" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Download, verify, and smoke-test the binary
-        if: steps.check.outputs.exists == '0'
+        if: steps.check.outputs.run_full == '1'
         id: smoke
         run: |
           set -euo pipefail
@@ -90,7 +107,6 @@ jobs:
 
           chmod +x claude
           VER_OUT=$(./claude --version)
-          echo "binary reports: $VER_OUT"
 
           {
             echo "commit=$(jq -r '.commit' manifest.json)"
@@ -100,73 +116,65 @@ jobs:
             echo "VEROUT_EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # continue-on-error: a failure here (Termux's glibc no longer runs
+      # this claude build) must not stop the job — the next step still
+      # needs to run to flag it on an already-published release.
       - name: Verify against Termux's real glibc build
-        if: steps.check.outputs.exists == '0'
+        if: steps.check.outputs.run_full == '1'
         id: termux_glibc
+        continue-on-error: true
         run: |
           set -euo pipefail
           GLIBC_REPO=https://packages-cf.termux.dev/apt/termux-glibc
-
-          # Written to a file rather than piped into awk: an early
-          # `exit` inside a pipeline reader closes the pipe while curl is
-          # still writing, and under `pipefail` that SIGPIPE turns into a
-          # hard failure of this whole step — writing to a file first
-          # avoids that entirely.
-          curl -fsSL -o packages.txt "$GLIBC_REPO/dists/glibc/stable/binary-aarch64/Packages"
-          PKG_BLOCK=$(awk '/^Package: glibc$/{p=1} p{print} p && /^$/{p=0}' packages.txt)
-          FILENAME=$(printf '%s\n' "$PKG_BLOCK" | sed -n 's/^Filename: //p')
-          GLIBC_VER=$(printf '%s\n' "$PKG_BLOCK" | sed -n 's/^Version: //p')
-          if [ -z "$FILENAME" ] || [ -z "$GLIBC_VER" ]; then
-            echo "could not find the glibc package entry in Termux's Packages index — repo layout may have changed" >&2
-            exit 1
-          fi
-
-          # Downloaded fresh every run, extracted to a scratch dir, never
-          # installed system-wide or retained past this job — this is
-          # Termux's own glibc-repo package, not Anthropic's binary, so
-          # there's no redistribution concern here either.
-          curl -fSL -o termux-glibc.deb "$GLIBC_REPO/$FILENAME"
+          curl -fSL -o termux-glibc.deb "$GLIBC_REPO/${{ steps.termux_ver.outputs.filename }}"
           mkdir -p termux-root
           dpkg -x termux-glibc.deb termux-root
 
           TERMUX_LD=$(find termux-root -name 'ld-linux-aarch64.so.1' -print -quit)
           if [ -z "$TERMUX_LD" ]; then
-            echo "ld-linux-aarch64.so.1 not found inside Termux's glibc package — package layout may have changed" >&2
+            echo "ld-linux-aarch64.so.1 not found inside Termux's glibc package — layout may have changed" >&2
             exit 1
           fi
           LIBDIR=$(dirname "$TERMUX_LD")
 
           # Invoke the loader directly (same pattern scripts/update.sh
-          # uses for its own version check) instead of patchelf +
-          # kernel-loading the binary — this doesn't depend on an
-          # ld.so.cache existing for a freshly dpkg -x'd tree, and tests
-          # the same underlying question: does Termux's actual shipped
-          # glibc load and run this binary correctly.
-          TERMUX_VER_OUT=$("$TERMUX_LD" --library-path "$LIBDIR" ./claude --version)
-          echo "against Termux glibc $GLIBC_VER: $TERMUX_VER_OUT"
+          # uses for its own version check) rather than patchelf +
+          # kernel-loading — no ld.so.cache needed for a freshly dpkg
+          # -x'd tree, and it tests the same underlying question: does
+          # Termux's actual shipped glibc load and run this binary.
+          "$TERMUX_LD" --library-path "$LIBDIR" ./claude --version
 
-          {
-            echo "termux_glibc_version=$GLIBC_VER"
-            echo "termux_reported_version<<VEROUT_EOF"
-            echo "$TERMUX_VER_OUT"
-            echo "VEROUT_EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Create the release
-        if: steps.check.outputs.exists == '0'
+      - name: Publish or update the release
+        if: steps.check.outputs.run_full == '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           VER="${{ steps.ver.outputs.version }}"
-          gh release create "claude-$VER" \
-            --title "claude $VER" \
-            --notes "Detected new Claude Code release **$VER** (commit \`${{ steps.smoke.outputs.commit }}\`, built ${{ steps.smoke.outputs.build_date }}).
+          TAG="claude-$VER"
+          GLIBC_VER="${{ steps.termux_ver.outputs.version }}"
 
-          Smoke-tested on a GitHub-hosted \`ubuntu-24.04-arm\` runner: the \`linux-arm64\` binary downloaded, its SHA-256 matched Anthropic's manifest, and \`--version\` ran successfully (reported: \`${{ steps.smoke.outputs.reported_version }}\`) — directly on real arm64 glibc Linux, no patching needed for that.
+          if [ "${{ steps.termux_glibc.outcome }}" = "success" ]; then
+            NOTES="Claude Code $VER — commit \`${{ steps.smoke.outputs.commit }}\`, built ${{ steps.smoke.outputs.build_date }}
 
-          Also re-verified against Termux's own currently-shipped \`glibc\` package (v${{ steps.termux_glibc.outputs.termux_glibc_version }}, downloaded fresh from Termux's own apt repo for this check, never retained): \`--version\` via that loader reported \`${{ steps.termux_glibc.outputs.termux_reported_version }}\`. This is a reasonable signal the patched install path will keep working, not a guarantee.
+          - SHA-256 verified against Anthropic's manifest
+          - Runs on generic arm64 glibc (Ubuntu) and Termux glibc $GLIBC_VER
+          - Not verified: on-device Bionic/Termux kernel behavior (README \"Troubleshooting\" #9)
 
-          **This does not verify it works on Termux/Android (Bionic) end to end.** A GitHub-hosted runner always runs a real Linux kernel, never a real Android kernel — it can't catch anything kernel-level, like the epoll_pwait2 trap (see README \"Troubleshooting\" #9). Run \`termux-update-claude\` yourself and open an issue if something still breaks on-device.
+          <!-- termux_glibc=$GLIBC_VER -->"
+          else
+            NOTES="⚠️ Termux glibc $GLIBC_VER broke this build (\`--version\` failed) — investigate before running \`termux-update-claude\`.
 
-          No Anthropic binary is redistributed by this release — only these notes and a version tag."
+          <!-- termux_glibc=$GLIBC_VER -->"
+          fi
+
+          if [ "${{ steps.check.outputs.exists }}" = "1" ]; then
+            gh release edit "$TAG" --notes "$NOTES"
+          else
+            if [ "${{ steps.termux_glibc.outcome }}" = "success" ]; then
+              gh release create "$TAG" --title "claude $VER" --notes "$NOTES"
+            else
+              echo "first-time verification failed — not publishing a release for $VER" >&2
+              exit 1
+            fi
+          fi
