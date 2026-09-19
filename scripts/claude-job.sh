@@ -78,6 +78,7 @@ cmd_add() {
   local args=(--script "$stub" --job-id "$id" --network "$network" --charging "$charging" --persisted "$persisted")
   [ "$period_ms" -gt 0 ] && args+=(--period-ms "$period_ms")
   termux-job-scheduler "${args[@]}"
+  command -v termux-hooks >/dev/null 2>&1 && termux-hooks emit job.add '{\"job\":\"claude\",\"name\":\"$name\",\"id\":$id}' 2>/dev/null || true
 
   if [ "$period_ms" -gt 0 ]; then
     echo "Scheduled '$name' (job-id $id), every ${period_ms}ms."
@@ -114,6 +115,7 @@ cmd_remove() {
   termux-job-scheduler --cancel --job-id "$id" || true
   rm -f "$f" "$JOBS_DIR/$name.sh" "$JOBS_DIR/$name.log"
   echo "Removed '$name' (job-id $id)."
+  command -v termux-hooks >/dev/null 2>&1 && termux-hooks emit job.remove '{\"job\":\"claude\",\"name\":\"$name\",\"id\":$id}' 2>/dev/null || true
 }
 
 cmd_run() {

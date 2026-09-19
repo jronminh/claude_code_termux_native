@@ -22,7 +22,7 @@ esac
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="uninstall.sh"
-TOTAL=10
+TOTAL=11
 # shellcheck source=scripts/lib.sh
 source "$REPO_DIR/scripts/lib.sh"
 
@@ -37,14 +37,16 @@ remove_claude_native() {
     # (~300MB) part to reproduce. Just clear out what made them "live".
     rm -f "$DEST"/autocheck.sh "$DEST"/update.sh "$DEST"/doctor.sh \
           "$DEST"/session-hooks.sh "$DEST"/claude-job-runner.sh \
+          "$DEST"/adb-bridge.sh "$DEST"/feature-hooks.sh "$DEST"/claude-features.sh \
           "$DEST"/.claude-native.lock "$DEST"/.repatch-history \
           "$DEST"/.doctor-last-versions "$DEST"/.pinned-version \
           "$DEST"/update-fail-*.log
+    rm -rf "$DEST"/skill-sources "$DEST"/docs
   fi
 }
 
 remove_wrapper() {
-  rm -f "$BIN_DIR/claude" "$BIN_DIR/termux-update-claude" "$BIN_DIR/termux-claude-job"
+  rm -f "$BIN_DIR/claude" "$BIN_DIR/termux-update-claude" "$BIN_DIR/termux-claude-job" "$BIN_DIR/termux-claude-features"
 }
 
 # Must run BEFORE remove_claude_native (--full) / remove_wrapper: cancels
@@ -100,22 +102,19 @@ remove_doctor_hook() {
   ' "$settings" > "$tmp" && mv "$tmp" "$settings"
 }
 
+# These just call the same enable/disable functions
+# `termux-claude-features` uses at runtime (feature-hooks.sh, sourced via
+# lib.sh from this repo's own copy — independent of whether the STAGED
+# copy under ~/.claude/claude-native/ has already been removed by
+# remove_claude_native, since this doesn't shell out to it).
 remove_session_hooks() {
-  local settings="$HOME/.claude/settings.json"
-  [ -e "$settings" ] || return 0
   command -v jq >/dev/null 2>&1 || return 0
-  cp -f "$settings" "$settings.bak"
-  local tmp; tmp=$(mktemp)
-  jq --arg marker "$SESSION_HOOKS_MARKER" '
-    def drop_ours(arr): arr | map(select(((.hooks // []) | map(.command // "") | any(test($marker))) | not));
-    .hooks.UserPromptSubmit = drop_ours(.hooks.UserPromptSubmit // [])
-    | .hooks.Stop = drop_ours(.hooks.Stop // [])
-    | .hooks.Notification = drop_ours(.hooks.Notification // [])
-    | if (.hooks.UserPromptSubmit | length) == 0 then del(.hooks.UserPromptSubmit) else . end
-    | if (.hooks.Stop | length) == 0 then del(.hooks.Stop) else . end
-    | if (.hooks.Notification | length) == 0 then del(.hooks.Notification) else . end
-    | if ((.hooks // {}) | length) == 0 then del(.hooks) else . end
-  ' "$settings" > "$tmp" && mv "$tmp" "$settings"
+  disable_notifications
+}
+
+remove_adb_bridge_hook() {
+  command -v jq >/dev/null 2>&1 || return 0
+  disable_adb_bridge
 }
 
 remove_claude_md() {
@@ -149,6 +148,7 @@ step "removing the autocheck hook from ~/.bashrc"                     remove_bas
 step "removing DISABLE_AUTOUPDATER from ~/.claude/settings.json"      remove_settings_key
 step "removing the doctor-hook SessionStart entry"                    remove_doctor_hook
 step "removing the optional session hooks (wake-lock/notifications)"  remove_session_hooks
+step "removing the optional ADB bridge (skill + Stop-hook reminder)"  remove_adb_bridge_hook
 step "removing our section from ~/.claude/CLAUDE.md"                  remove_claude_md
 step "removing the termux-doctor skill"                               remove_skill
 

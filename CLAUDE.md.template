@@ -71,4 +71,22 @@ granted — `command -v termux-notification` is a quick way to check):
   install), take it as real signal to prefer batching work over kicking off
   long unattended background tasks (including `termux-claude-job` runs)
   until it's charging — not something to just acknowledge and ignore.
+- **`termux-claude-features status`** — lists every optional capability
+  this setup can toggle (what each does, whether it's currently on, and
+  any safety notes) in its own output — e.g. background notifications, or
+  seeing/driving the actual Android screen for debugging something
+  `termux-api` can't reach. Features get added here over time without
+  this file changing, so run this (not memory of an earlier session)
+  whenever a task might benefit from a capability beyond bare Termux,
+  rather than assuming you already know the full list. `enable
+  <feature>`/`disable <feature>` toggles one on/off — ask the user first
+  if `status` marks that feature security-sensitive.
+- Deeper technical detail on how this whole setup fits together (every
+  staged script's role, the pattern behind opt-in features, why some
+  things are staged vs. installed vs. merged into `~/.claude/`) lives at
+  `~/.claude/claude-native/docs/architecture.md` — read it on demand when
+  actually working on this setup itself (not needed for ordinary use).
+  This file is deliberately kept short instead of growing with every new
+  feature; `docs/architecture.md` and `termux-claude-features status`
+  absorb that detail instead.
 <!-- claude-code-termux-native:end -->

@@ -118,11 +118,28 @@ fi
 emit termux_api "== Termux:API notifications ==" "$TERMUX_API_MSG"
 
 if grep -qs 'claude-code-termux-native:session-hooks' "$HOME/.claude/settings.json" 2>/dev/null; then
-  SESSION_HOOKS_MSG="ok: wired (per-turn wake-lock + battery-aware notifications) — installed with install.sh --with-notifications"
+  SESSION_HOOKS_MSG="ok: wired (per-turn wake-lock + battery-aware notifications) — disable: termux-claude-features disable notifications"
 else
-  SESSION_HOOKS_MSG="not wired — optional, opt-in. Run: bash install.sh --with-notifications (see README)"
+  SESSION_HOOKS_MSG="not wired — optional, opt-in. Run: termux-claude-features enable notifications (see README)"
 fi
 emit session_hooks "== Optional session hooks (wake-lock/notifications) ==" "$SESSION_HOOKS_MSG"
+
+if grep -qs 'claude-code-termux-native:adb-bridge-hook' "$HOME/.claude/settings.json" 2>/dev/null; then
+  ADB_WIRED_MSG="wired (Stop-hook reminder if left connected) — disable: termux-claude-features disable adb-bridge"
+else
+  ADB_WIRED_MSG="not wired — optional, opt-in. Run: termux-claude-features enable adb-bridge (see README, or the adb-bridge skill)"
+fi
+if ! command -v adb >/dev/null 2>&1; then
+  ADB_CONN_MSG="android-tools not installed — pkg install android-tools to use the adb-bridge skill"
+else
+  ADB_DEV=$(timeout 3 adb devices 2>/dev/null | awk 'NR>1 && $2=="device"{print $1}')
+  if [ -n "$ADB_DEV" ]; then
+    ADB_CONN_MSG="WARN: adb currently connected ($ADB_DEV) — shell-UID screen/input access is live; turn off Wireless debugging in Developer options when done"
+  else
+    ADB_CONN_MSG="ok: android-tools installed, no device currently connected"
+  fi
+fi
+emit adb_bridge "== ADB bridge (optional full-screen access, see adb-bridge skill) ==" "$ADB_WIRED_MSG"$'\n'"$ADB_CONN_MSG"
 
 JOBS_DIR="$HOME/.claude/claude-native/jobs"
 if ! command -v termux-job-scheduler >/dev/null 2>&1; then

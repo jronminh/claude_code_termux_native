@@ -36,7 +36,17 @@ cd ~/claude-code-termux-native
 bash install.sh
 ```
 
-Both paths are idempotent — safe to re-run any time, e.g. after a Termux/glibc upgrade. Add `--with-notifications` to also wire the optional [session hooks](#extra-features-beyond-a-bare-install) (per-turn wake-lock + Termux:API notifications) — off by default since, unlike everything else `install.sh` does, it changes day-to-day interactive behavior rather than fixing the execution path itself. Via the one-liner: `curl -fsSL .../bootstrap.sh | bash -s -- --with-notifications`.
+Both paths are idempotent — safe to re-run any time, e.g. after a Termux/glibc upgrade. Add `--with-notifications` and/or `--with-adb-bridge` to also turn on those two opt-in features (see [Extra features](#extra-features-beyond-a-bare-install)) right from the first install. Via the one-liner: `curl -fsSL .../bootstrap.sh | bash -s -- --with-notifications --with-adb-bridge`.
+
+These flags only matter at first install — **to turn either one on or off later, don't re-run `install.sh`.** Use the dedicated `termux-claude-features` command instead (installed by `install.sh` either way):
+
+```sh
+termux-claude-features status                    # what's on/off right now
+termux-claude-features enable  adb-bridge         # or: notifications
+termux-claude-features disable adb-bridge         # or: notifications
+```
+
+This is the one thing `install.sh --with-X` and `uninstall.sh` don't cover well on their own: `install.sh` only ever *adds*, and short of `uninstall.sh` (which removes the entire setup, not just one feature), there was no way to turn a single feature back off. `termux-claude-features` is a small, standalone command exactly for that — see [Extra features](#extra-features-beyond-a-bare-install) for what each feature does.
 
 Then open a **new** Termux session (or `exec bash`) and run:
 
@@ -48,7 +58,7 @@ claude
 
 1. Checks you're on `aarch64` Termux.
 2. Installs/upgrades `glibc-repo`, `glibc`, `patchelf`, `jq`, `curl`, `ripgrep`, `coreutils`.
-3. Stages `autocheck.sh` / `update.sh` / `doctor.sh` / `session-hooks.sh` into `~/.claude/claude-native/` (the last one is only *wired up* opt-in — see step 12 below — but always staged so `--with-notifications` can be enabled later without a re-download).
+3. Stages `autocheck.sh` / `update.sh` / `doctor.sh` / `session-hooks.sh` / `adb-bridge.sh` / `feature-hooks.sh` / `claude-features.sh` into `~/.claude/claude-native/` (`session-hooks.sh`/`adb-bridge.sh` are only *wired up* opt-in — see steps 12–13 below — but always staged, along with the adb-bridge skill source under `skill-sources/` and this repo's own [`docs/`](docs/) under `docs/`, so `termux-claude-features enable ...` can turn either feature on later, and Claude can read the architecture doc, without a re-download or the repo checkout).
 4. Runs `update.sh` to download, verify, patch, and install the `claude` binary — the same path every later update uses.
 5. Installs `claude` and `termux-update-claude` into `$PREFIX/bin`.
 6. Hooks `autocheck.sh` into `~/.bashrc` (self-heal + silent update-check on every new shell).
@@ -57,7 +67,9 @@ claude
 9. Merges [`CLAUDE.md.template`](CLAUDE.md.template) into your global `~/.claude/CLAUDE.md`, between `<!-- claude-code-termux-native:begin/end -->` markers, so claude recognizes this environment from the start of every session. Appends if you have your own content there; updates in place (never duplicates) on a later install. `uninstall.sh` removes just this section.
 10. Installs the [`termux-doctor`](skills/termux-doctor/SKILL.md) skill to `~/.claude/skills/termux-doctor/`. The CLAUDE.md pointer tells claude to invoke it on any symptom from this setup (segfaults, bad ELF errors, patchelf weirdness, ...) instead of guessing — the full trap list and self-repair playbook load only when actually relevant.
 11. Merges [`keybindings.json.template`](keybindings.json.template) into your `~/.claude/keybindings.json` — see [Extra features](#extra-features-beyond-a-bare-install) for what it rebinds and why.
-12. With `--with-notifications`: wires `session-hooks.sh` into the `UserPromptSubmit`/`Stop`/`Notification` hooks (per-turn wake-lock + Termux:API notifications) — see [Extra features](#extra-features-beyond-a-bare-install). Skipped by default.
+12. With `--with-notifications`: wires `session-hooks.sh` into the `UserPromptSubmit`/`Stop`/`Notification` hooks (per-turn wake-lock + Termux:API notifications) — see [Extra features](#extra-features-beyond-a-bare-install). Skipped by default; toggle it later with `termux-claude-features` instead of re-running install.sh (see step 14).
+13. With `--with-adb-bridge`: installs the [`adb-bridge`](skills/adb-bridge/SKILL.md) skill and wires a `Stop` hook that reminds you if a wireless ADB device is still connected when a turn ends — see [Extra features](#extra-features-beyond-a-bare-install). Skipped by default (security-sensitive); toggle it later with `termux-claude-features` instead of re-running install.sh (see step 14).
+14. Installs `termux-claude-features` into `$PREFIX/bin` (always, regardless of the two flags above) — the dedicated command for turning steps 12/13's features on or off *after* install, without re-running `install.sh` or reaching for `uninstall.sh`. See [Extra features](#extra-features-beyond-a-bare-install).
 
 ## Migrating from a plain npm install
 
@@ -83,6 +95,11 @@ If you're not on the old npm path, running `migrate.sh` is a safe no-op — it r
   update.sh             # download/verify/patch/install + rollback
   doctor.sh             # diagnostic dump — run this first when something's broken
   session-hooks.sh      # optional Termux:API hooks (wake-lock + battery-aware notifications), only wired with --with-notifications
+  adb-bridge.sh          # optional wireless-ADB screen/input/log bridge, only wired with --with-adb-bridge
+  feature-hooks.sh       # shared enable/disable logic for notifications + adb-bridge, used by install.sh, uninstall.sh, AND termux-claude-features
+  claude-features.sh     # backs the `termux-claude-features` command — toggle an opt-in feature without re-running install.sh/uninstall.sh
+  skill-sources/adb-bridge/SKILL.md  # staged copy so `termux-claude-features enable adb-bridge` works without the repo checkout
+  docs/*.md               # this repo's own reference docs — architecture map, Claude Code hooks reference, Termux:API survey, keybindings rationale (see docs/ in the repo)
   claude-job-runner.sh   # invoked by Android's JobScheduler for a scheduled `termux-claude-job`
   jobs/                  # one <name>.json (definition) + <name>.sh (stub JobScheduler target) + <name>.log per scheduled job
   .claude-native.lock    # flock used by autocheck.sh and update.sh so they never race
@@ -94,9 +111,11 @@ If you're not on the old npm path, running `migrate.sh` is a safe no-op — it r
 $PREFIX/bin/claude               # wrapper — what actually runs when you type `claude`
 $PREFIX/bin/termux-update-claude # manual update/rollback command
 $PREFIX/bin/termux-claude-job    # schedule/list/remove/run headless `claude -p` jobs via Android's JobScheduler
+$PREFIX/bin/termux-claude-features  # status/enable/disable for notifications + adb-bridge, without re-running install.sh
 
 ~/.claude/CLAUDE.md              # our section lives inside begin/end markers; rest of the file is yours
 ~/.claude/skills/termux-doctor/SKILL.md   # full trap list + self-repair playbook, invoked on demand
+~/.claude/skills/adb-bridge/SKILL.md      # wireless-ADB screen/input/log bridge, only installed with --with-adb-bridge
 ~/.claude/keybindings.json        # our rebinds merged in by value (no comment syntax to hang markers off), tracked via claude-native/.keybindings-managed.json
 ```
 
@@ -113,11 +132,12 @@ To change how any of this works, edit `scripts/` **in this repo** and re-run `in
 - **Version pinning**: `termux-update-claude --pin` locks onto a specific version, so neither a manual run nor `autocheck.sh`'s silent per-shell check ever advances past it — `--pin` alone pins whatever's currently installed (no download); `--pin <version>` downloads/verifies/installs that exact version first, same pipeline as a normal update, then pins it. `--unpin` resumes tracking `stable`. A drift between the pin and what's actually installed (e.g. after a manual `--rollback`) is surfaced, never silently auto-corrected — `autocheck.sh`'s self-heal is local-only (chmod/re-patch) and deliberately never downloads on its own, so `doctor.sh` and the check-only nudge report the mismatch and leave the ~300MB fetch to an explicit `termux-update-claude` run. Whether Anthropic's CDN keeps old versions' manifests reachable indefinitely is unverified — an old pin can eventually 404; that failure is reported the same way any other update failure is, with a full log saved to `$DEST/update-fail-<timestamp>.log`.
 - **`settings.json` backup**: `install.sh`, `autocheck.sh`, and `uninstall.sh` each back up `~/.claude/settings.json` to `settings.json.bak` before touching the `DISABLE_AUTOUPDATER` key or the `doctor.sh` hook. Restore with `cp ~/.claude/settings.json.bak ~/.claude/settings.json`; `doctor.sh` reports backup status.
 - **Termux:API notifications** (optional — `pkg install termux-api` + the Termux:API app, not installed by `install.sh`): if `termux-notification` is available, a real update failure or a repatch-frequency escalation each push a notification, so they're not missed in a backgrounded tab. `doctor.sh` reports whether this is wired up.
-- **`doctor.sh`**: one-shot diagnostic dump — arch/ABI cross-check (catches binary-translation layers), kernel `epoll_pwait2` risk (checked against whether the *installed binary* carries the upstream fix, not just the kernel version), paths, binary/interpreter state, leaked `LD_*` env, autoupdater-disabled check, `settings.json` backup status, Termux:API wiring, optional session-hooks wiring, Termux build freshness (flags a likely stale/Play-Store install), glibc/patchelf version drift, `$HOME` `noexec` check, free disk space, and `--version` (with update recognition). Run this first, before guessing.
+- **`doctor.sh`**: one-shot diagnostic dump — arch/ABI cross-check (catches binary-translation layers), kernel `epoll_pwait2` risk (checked against whether the *installed binary* carries the upstream fix, not just the kernel version), paths, binary/interpreter state, leaked `LD_*` env, autoupdater-disabled check, `settings.json` backup status, Termux:API wiring, optional session-hooks wiring, optional ADB-bridge wiring + live connection state, Termux build freshness (flags a likely stale/Play-Store install), glibc/patchelf version drift, `$HOME` `noexec` check, free disk space, and `--version` (with update recognition). Run this first, before guessing.
 - **Release tracking** ([`.github/workflows/track-claude-release.yml`](.github/workflows/track-claude-release.yml)): runs hourly (and on manual `workflow_dispatch`) on a GitHub-hosted `ubuntu-24.04-arm` runner — resolves the current `stable` version, and if this repo doesn't have a release for it yet, downloads the `linux-arm64` binary, verifies its SHA-256 against Anthropic's manifest, confirms `--version` runs on real arm64 glibc Linux (no patching needed for that), then publishes a GitHub Release tagged `claude-<version>`. This only confirms Anthropic's build itself is intact — it does **not** verify anything Bionic/Termux-specific (the patchelf interpreter swap, `epoll_pwait2`, ...), since a GitHub-hosted runner can't exercise that path. Deliberately schedule/`workflow_dispatch`-only, never `pull_request`-triggered — this repo is public, and self-hosted runners (which could give full-fidelity Bionic testing) were considered and set aside specifically because of that.
   - `doctor.sh --json` — the same checks as one JSON object (needs `jq`), for scripting.
   - `doctor.sh --fix` — runs the same locked self-heal block as `autocheck.sh`, then the normal dump, on demand instead of only at shell startup.
 - **`termux-doctor` skill**: the trap list, self-repair design, and golden rules live in a Claude Code skill (`~/.claude/skills/termux-doctor/`) instead of every session's context via CLAUDE.md — claude invokes it on demand when it recognizes a symptom from this setup.
+- **Staged reference docs** (always, not opt-in — [`docs/`](docs/), staged whole to `~/.claude/claude-native/docs/`): `architecture.md` (file-by-file map), `claude-code-hooks-reference.md` (general Claude Code hook behavior, verified the hard way), `termux-api-survey.md` (every `termux-*` command surveyed, built vs. deferred vs. rejected), `keybindings-notes.md` (the rationale behind `keybindings.json.template`'s rebinds). Kept OUT of `~/.claude/CLAUDE.md` on purpose — `CLAUDE.md.template` points at `docs/architecture.md` instead of describing internals itself, so `CLAUDE.md`'s footprint (loaded into every session, every project) stays roughly constant as this repo grows; the detail is opt-in-by-read, not paid for every session regardless of relevance. Adding a new file here needs no `install.sh` edit — it stages every `docs/*.md` generically.
 - **Termux-friendly keybindings** (default, not opt-in — [`keybindings.json.template`](keybindings.json.template), `install.sh` step 11): Termux's default extra-keys row has no Shift key, and CTRL/ALT are only reachable as a tap-then-key (not held), so a few of Claude Code's default bindings don't work at all, or need an awkward two-tap `ctrl+x`-chord within a 1-second window. Merged into `~/.claude/keybindings.json` as single `alt+key` alternatives instead:
   - `alt+m` → `chat:cycleMode` (default `shift+tab` — unreachable, no Shift key)
   - `alt+b` → `app:toggleBrief` (default `ctrl+shift+b` — same problem)
@@ -125,12 +145,20 @@ To change how any of this works, edit `scripts/` **in this repo** and re-run `in
   - `ctrl+x ctrl+s` → `chat:stash`, replacing the default plain `ctrl+s` (which risks being read as terminal XOFF flow control, freezing output until `ctrl+q`)
   - `alt+x` → `chat:killAgents`, `alt+g` → `task:background`, `alt+a` → `abovePrompt:toggle`, `alt+d` → `app:cycleDiffBase` (Diff­Panel) — single-tap alternatives to each action's `ctrl+x`-prefixed chord
   - All additive (your own bindings and the originals still work) and merged by value rather than by marker comment (JSON has no comment syntax): `install.sh` remembers exactly which entries it added in `~/.claude/claude-native/.keybindings-managed.json`, so re-running it after a template change replaces just those entries — anything else in your `keybindings.json` is left alone. `uninstall.sh` reverses it the same way. Don't hand-edit a value *inside* one of these managed entries (add your own separate binding instead) — a later `install.sh` run won't recognize the edit as ours and may re-add the original alongside it.
-- **Session hooks** (opt-in — `install.sh --with-notifications`, `scripts/session-hooks.sh`): wires three Claude Code hooks to Termux:API so the phone tells you things without you watching the terminal.
+- **Toggling opt-in features after install** (`termux-claude-features`, `scripts/claude-features.sh`): `install.sh --with-notifications`/`--with-adb-bridge` are for the *first* install only. To turn either one on or off afterward — without re-running `install.sh` (which only adds) or `uninstall.sh` (which removes the whole setup) — use:
+  - `termux-claude-features status` — what's on/off, plus live ADB connection state.
+  - `termux-claude-features enable <notifications|adb-bridge>` / `disable <notifications|adb-bridge>`.
+  - The actual wiring logic (`scripts/feature-hooks.sh`) is shared code: `install.sh --with-X`, `uninstall.sh`, and `termux-claude-features` all call the exact same `enable_X`/`disable_X` functions, so none of the three can drift out of sync with each other.
+- **Session hooks** (opt-in — enable/disable with `termux-claude-features {enable|disable} notifications`, `scripts/session-hooks.sh`): wires three Claude Code hooks to Termux:API so the phone tells you things without you watching the terminal.
   - `UserPromptSubmit` → `termux-wake-lock`, `Stop` → `termux-wake-unlock`: holds a wake lock only while Claude is actually working on a turn, so Android doesn't throttle/kill a long-running task in the background when the screen locks. Needs only bare Termux — no Termux:API app required. Ref-counted across concurrent Termux tabs/sessions via a shared lockfile + per-session marker files, so one tab finishing its turn can't drop the wake lock out from under a different tab still mid-task.
   - `Notification` (matcher: `permission_prompt|idle_prompt|agent_needs_input|agent_completed`) → a `termux-notification`, so a permission prompt or an idle wait doesn't go unnoticed off-screen.
   - `Stop` also pushes a "task finished" notification, but only if the turn ran 60+ seconds — short back-and-forth chat stays quiet.
   - **Battery-aware context**: `UserPromptSubmit` also checks `termux-battery-status`, and if the device is at or below 20% and not charging, feeds Claude a plain-text heads-up as turn context (not a human-facing notification) — so Claude itself can choose to batch work or hold off on long unattended background tasks instead of draining a low battery, without you having to say so. Silent whenever battery is fine, charging, or the check can't complete (capped at 3s so a missing/ungranted Termux:API app never delays a turn).
   - All of the above need `pkg install termux-api` + the Termux:API app; `doctor.sh` reports whether they're wired and whether Termux:API is available. Every action is best-effort and never blocks a turn (hooks always exit 0 — there's no documented safe way to recover a blocked `Stop` hook, so this repo doesn't try).
+- **ADB bridge** (opt-in — enable/disable with `termux-claude-features {enable|disable} adb-bridge`, `scripts/adb-bridge.sh`, [`adb-bridge` skill](skills/adb-bridge/SKILL.md)): lets Claude see and drive the *entire* Android screen, not just what's inside Termux, via a wireless ADB connection **paired from the device to itself** (no computer needed). Solves a real gap Termux's own tools can't: `termux-api` has no screenshot command, and Termux's own `screencap`/`logcat` are restricted to `root`/`system`/`shell` UIDs.
+  - `status`/`screenshot`/`dump` (exact-coordinate `uiautomator` UI dump)/`tap`/`swipe`/`logcat`/`logcat-clear` subcommands on `adb-bridge.sh`.
+  - **Security-sensitive**: `adb shell` runs at the `shell` UID (broad system visibility, input injection anywhere), and a pairing persists until revoked in Developer options — not just for one session. The skill's "Security posture" section covers this in full; short version: ask before a new pairing, never wire it into a background/per-turn hook, remind the user to disconnect when done.
+  - The opt-in `Stop` hook nags (never blocks) if a device is still connected when a turn ends; `doctor.sh` also reports live connection state and whether the hook is wired.
 - **Scheduled jobs** (`termux-claude-job`, always installed — not opt-in, since nothing runs until you explicitly schedule one): runs a headless `claude -p "<prompt>"` on a real Android JobScheduler schedule, not plain cron — a background loop/cron job gets killed by Android the moment the screen locks or Doze kicks in; JobScheduler actually wakes the device for it.
   - `termux-claude-job add <name> --prompt "..." [--prompt-file PATH] [--period-ms N] [--cwd DIR] [--persisted] [--charging] [--network TYPE]` — schedules it (omit `--period-ms` for one-shot; Android clamps periodic jobs to a 15-minute/900000ms minimum). Re-running `add` with the same name replaces its schedule (same underlying job-id, derived deterministically from the name).
   - `termux-claude-job list` / `log <name>` / `run <name>` (trigger once now, for testing) / `remove <name>`.
@@ -189,13 +217,17 @@ bash uninstall.sh          # keeps the downloaded binary cached
 bash uninstall.sh --full   # also deletes the cached binary
 ```
 
-Removes `claude` / `termux-update-claude`, the `~/.bashrc` hook, `DISABLE_AUTOUPDATER`, the `doctor.sh` hook, the optional session hooks (if `--with-notifications` was ever used), the self-repair scripts, the `termux-doctor` skill, and our section of `~/.claude/CLAUDE.md` (only what's between its markers). Keeps the ~300MB binary + `manifest.json` cached by default so a future install skips the download; `--full` wipes that too.
+Removes `claude` / `termux-update-claude` / `termux-claude-job` / `termux-claude-features`, the `~/.bashrc` hook, `DISABLE_AUTOUPDATER`, the `doctor.sh` hook, the optional session hooks and the optional ADB-bridge `Stop` hook + skill (removed unconditionally — safe no-op if either was never enabled), the self-repair scripts, the `termux-doctor` skill, and our section of `~/.claude/CLAUDE.md` (only what's between its markers). Keeps the ~300MB binary + `manifest.json` cached by default so a future install skips the download; `--full` wipes that too.
+
+**Only want to turn off `notifications` or `adb-bridge`, not remove the whole install?** Use `termux-claude-features disable <feature>` instead — see [Extra features](#extra-features-beyond-a-bare-install). `uninstall.sh` is for removing this repo's setup entirely.
 
 Leaves the Termux packages (`glibc`, `patchelf`, `jq`, `ripgrep`, ...) and the cloned repo directory alone either way — neither is exclusively this project's to remove; `uninstall.sh` prints the command if you want them gone too.
 
 ## Contributing
 
 The issues and fixes above came from real breakage, not speculation. Hit a new one on a different Termux/glibc version? A PR adding it to the table (symptom → cause → fix) is exactly the contribution this repo wants.
+
+New to the codebase? [`docs/architecture.md`](docs/architecture.md) is a file-by-file map of what every script does and how the opt-in-feature pattern (staged script → `feature-hooks.sh` → three thin callers: `install.sh`/`uninstall.sh`/`termux-claude-features`) fits together — read that before README's install-focused prose if you're here to change code rather than just use it.
 
 ## License
 

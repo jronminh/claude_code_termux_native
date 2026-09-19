@@ -13,16 +13,20 @@
 set -euo pipefail
 
 WITH_NOTIFICATIONS=0
-case "${1:-}" in
-  "") ;;
-  --with-notifications) WITH_NOTIFICATIONS=1 ;;
-  *) echo "usage: install.sh [--with-notifications]" >&2; exit 2 ;;
-esac
+WITH_ADB_BRIDGE=0
+for arg in "$@"; do
+  case "$arg" in
+    --with-notifications) WITH_NOTIFICATIONS=1 ;;
+    --with-adb-bridge) WITH_ADB_BRIDGE=1 ;;
+    *) echo "usage: install.sh [--with-notifications] [--with-adb-bridge]" >&2; exit 2 ;;
+  esac
+done
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="install.sh"
 TOTAL=11
-[ "$WITH_NOTIFICATIONS" = "1" ] && TOTAL=12
+[ "$WITH_NOTIFICATIONS" = "1" ] && TOTAL=$((TOTAL + 1))
+[ "$WITH_ADB_BRIDGE" = "1" ] && TOTAL=$((TOTAL + 1))
 # shellcheck source=scripts/lib.sh
 source "$REPO_DIR/scripts/lib.sh"
 
@@ -48,12 +52,32 @@ stage_scripts() {
   install -m 700 "$REPO_DIR/scripts/doctor.sh"              "$DEST/doctor.sh"
   install -m 700 "$REPO_DIR/scripts/session-hooks.sh"       "$DEST/session-hooks.sh"
   install -m 700 "$REPO_DIR/scripts/claude-job-runner.sh"   "$DEST/claude-job-runner.sh"
+  install -m 700 "$REPO_DIR/scripts/adb-bridge.sh"          "$DEST/adb-bridge.sh"
+  install -m 700 "$REPO_DIR/scripts/feature-hooks.sh"       "$DEST/feature-hooks.sh"
+  install -m 700 "$REPO_DIR/scripts/claude-features.sh"     "$DEST/claude-features.sh"
+  # Skill sources for features that install a skill (currently just
+  # adb-bridge): staged unconditionally, same reasoning as adb-bridge.sh
+  # itself, so `termux-claude-features enable adb-bridge` works later even
+  # if --with-adb-bridge wasn't passed at install time (or the repo
+  # checkout this ran from is long gone by then).
+  mkdir -p "$DEST/skill-sources/adb-bridge"
+  install -m 600 "$REPO_DIR/skills/adb-bridge/SKILL.md" "$DEST/skill-sources/adb-bridge/SKILL.md"
+  # docs/ — staged so this detail is available on-device (read on demand,
+  # zero token cost unless actually read) without needing the repo
+  # checkout. CLAUDE.md.template points at docs/architecture.md instead of
+  # growing itself; every *.md here is staged generically so adding a new
+  # doc file to the repo never needs an install.sh edit.
+  mkdir -p "$DEST/docs"
+  for f in "$REPO_DIR"/docs/*.md; do
+    install -m 600 "$f" "$DEST/docs/$(basename "$f")"
+  done
 }
 
 install_wrapper() {
   install -m 700 "$REPO_DIR/scripts/claude-wrapper.sh" "$BIN_DIR/claude"
   install -m 700 "$REPO_DIR/scripts/termux-update-claude.sh" "$BIN_DIR/termux-update-claude"
   install -m 700 "$REPO_DIR/scripts/claude-job.sh" "$BIN_DIR/termux-claude-job"
+  install -m 700 "$REPO_DIR/scripts/termux-claude-features.sh" "$BIN_DIR/termux-claude-features"
 }
 
 wire_bashrc() {
@@ -102,38 +126,21 @@ install_doctor_hook() {
   ' "$settings" > "$tmp" && mv "$tmp" "$settings"
 }
 
-# Upsert-by-marker for the optional Termux:API session hooks (wake-lock
-# per turn + notifications for important moments and long-finished tasks).
-# Only called when install.sh runs with --with-notifications. Mirrors
-# install_doctor_hook's marker-based upsert across three hook events so
-# re-running never leaves stale/duplicate entries and never touches hooks
-# the user configured themselves.
+# Thin wrappers around feature-hooks.sh's enable_X functions (sourced via
+# lib.sh -> scripts/feature-hooks.sh) — the same functions
+# `termux-claude-features enable/disable` calls at runtime, so install.sh
+# --with-X and the standalone command never drift apart. install.sh's own
+# job here is only to back up settings.json first, same as every other
+# settings.json-touching step in this file.
 install_session_hooks() {
-  mkdir -p "$HOME/.claude"
-  local settings="$HOME/.claude/settings.json"
-  if [ -e "$settings" ]; then
-    cp -f "$settings" "$settings.bak"
-  else
-    echo '{}' > "$settings"
-  fi
-  local submit_cmd stop_cmd notify_cmd tmp
-  submit_cmd=$(session_hooks_submit_command)
-  stop_cmd=$(session_hooks_stop_command)
-  notify_cmd=$(session_hooks_notify_command)
-  tmp=$(mktemp)
-  jq --arg marker "$SESSION_HOOKS_MARKER" \
-     --arg submit "$submit_cmd" --arg stop "$stop_cmd" --arg notify "$notify_cmd" '
-    def drop_ours(arr): arr | map(select(((.hooks // []) | map(.command // "") | any(test($marker))) | not));
-    .hooks = ((.hooks // {})
-      + {UserPromptSubmit: (drop_ours(.hooks.UserPromptSubmit // [])
-          + [{"hooks": [{"type": "command", "command": $submit, "timeout": 10}]}])}
-      + {Stop: (drop_ours(.hooks.Stop // [])
-          + [{"hooks": [{"type": "command", "command": $stop, "timeout": 10}]}])}
-      + {Notification: (drop_ours(.hooks.Notification // [])
-          + [{"matcher": "permission_prompt|idle_prompt|agent_needs_input|agent_completed",
-              "hooks": [{"type": "command", "command": $notify, "async": true, "timeout": 10}]}])}
-    )
-  ' "$settings" > "$tmp" && mv "$tmp" "$settings"
+  enable_notifications
+}
+
+# Opt-in only (security-sensitive — see skills/adb-bridge/SKILL.md
+# "Security posture"). adb-bridge.sh itself is always staged by
+# stage_scripts regardless of this flag — staging alone is inert.
+install_adb_bridge() {
+  enable_adb_bridge "$REPO_DIR/skills/adb-bridge/SKILL.md"
 }
 
 install_claude_md() {
@@ -189,6 +196,9 @@ step "merging Termux-friendly keybindings"                    install_keybinding
 if [ "$WITH_NOTIFICATIONS" = "1" ]; then
   step "wiring optional Termux:API session hooks"               install_session_hooks
 fi
+if [ "$WITH_ADB_BRIDGE" = "1" ]; then
+  step "wiring optional ADB bridge (skill + Stop-hook reminder)" install_adb_bridge
+fi
 
 rm -f "$LOG"
 trap - ERR
@@ -200,6 +210,7 @@ echo
 printf '  %-18s: %s\n' "verify anytime"    "${DIM}bash $(shortp "$DEST")/doctor.sh${RESET}"
 printf '  %-18s: %s\n' "check for updates" "${DIM}termux-update-claude${RESET}"
 printf '  %-18s: %s\n' "schedule a job"    "${DIM}termux-claude-job add <name> --prompt \"...\" --period-ms 900000${RESET}"
+printf '  %-18s: %s\n' "toggle a feature"  "${DIM}termux-claude-features {status|enable|disable} <feature>${RESET}"
 printf '  %-18s: %s\n' "uninstall"         "${DIM}bash $(shortp "$REPO_DIR")/uninstall.sh${RESET}"
 echo
 echo "  Environment notes were also added to ~/.claude/CLAUDE.md, and the"
@@ -216,10 +227,27 @@ if [ "$WITH_NOTIFICATIONS" = "1" ]; then
   echo "  termux-notification alerts for permission/idle prompts and"
   echo "  long-finished tasks (needs the Termux:API app + termux-api for the"
   echo "  notifications; the wake-lock works with bare Termux either way)."
+  echo "  Turn off anytime: ${BOLD}termux-claude-features disable notifications${RESET}."
 else
   echo
-  echo "  Tip: re-run with ${BOLD}--with-notifications${RESET} to also wire an optional"
-  echo "  per-turn Termux wake-lock and Termux:API notifications (see README)."
+  echo "  Tip: ${BOLD}termux-claude-features enable notifications${RESET} wires an optional"
+  echo "  per-turn Termux wake-lock and Termux:API notifications (see README) —"
+  echo "  no need to re-run install.sh for this."
+fi
+
+if [ "$WITH_ADB_BRIDGE" = "1" ]; then
+  echo
+  echo "  The adb-bridge skill was installed, and a Stop hook now reminds you"
+  echo "  if a wireless ADB device is still connected when a turn ends. This is"
+  echo "  security-sensitive (adb shell runs at the shell UID) — see the skill's"
+  echo "  \"Security posture\" section before pairing a device."
+  echo "  Turn off anytime: ${BOLD}termux-claude-features disable adb-bridge${RESET}."
+else
+  echo
+  echo "  Tip: ${BOLD}termux-claude-features enable adb-bridge${RESET} lets Claude see and"
+  echo "  drive the full Android screen via self-paired wireless ADB (screenshots,"
+  echo "  exact-coordinate taps, full-system logcat) — opt-in, security-sensitive,"
+  echo "  see README. No need to re-run install.sh for this."
 fi
 
 if kernel_is_risky && ! epoll_fix_present "$DEST/claude"; then

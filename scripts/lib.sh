@@ -174,33 +174,15 @@ OUT=$(bash ~/.claude/claude-native/doctor.sh 2>&1); if printf '%s' "$OUT" | grep
 EOF
 }
 
-# Marker + hook-command generators for the optional Termux:API session
-# hooks (per-turn wake-lock + notifications, scripts/session-hooks.sh),
-# installed only when install.sh runs with --with-notifications. Unlike
-# the doctor hook, this changes day-to-day interactive behavior, so it's
-# opt-in rather than wired into every install.
-SESSION_HOOKS_MARKER="claude-code-termux-native:session-hooks"
-
-session_hooks_submit_command() {
-  cat <<'EOF'
-# claude-code-termux-native:session-hooks
-~/.claude/claude-native/session-hooks.sh submit
-EOF
-}
-
-session_hooks_stop_command() {
-  cat <<'EOF'
-# claude-code-termux-native:session-hooks
-~/.claude/claude-native/session-hooks.sh stop
-EOF
-}
-
-session_hooks_notify_command() {
-  cat <<'EOF'
-# claude-code-termux-native:session-hooks
-~/.claude/claude-native/session-hooks.sh notify
-EOF
-}
+# feature-hooks.sh holds the toggleable-feature logic (notifications,
+# adb-bridge): marker constants, hook-command generators, and the
+# enable_X/disable_X/X_wired functions that install.sh, uninstall.sh, and
+# the standalone `termux-claude-features` command (scripts/claude-features.sh)
+# all share. It's a separate file (not folded into this one) because it's
+# ALSO staged to ~/.claude/claude-native/feature-hooks.sh and sourced again
+# at runtime by claude-features.sh — see that file's own header for why.
+# shellcheck source=scripts/feature-hooks.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/feature-hooks.sh"
 
 # shortp PATH — shorten an absolute path for display: $HOME -> ~, $PREFIX ->
 # the literal string "$PREFIX" (the usual Termux convention). Only for
