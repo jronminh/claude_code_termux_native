@@ -1,3 +1,6 @@
+> **Archived. Use [bun-termux](https://github.com/jronminh/bun-termux) instead.**
+> Testing showed that Termux's `glibc-runner` (`grun`) runs the official `linux-arm64` binaries as they are, with no patching and no helper scripts. The guide there replaces this repo. The instructions below are kept for history and may no longer be needed.
+
 # claude-code-termux-native
 
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
